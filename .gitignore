@@ -11,9 +11,10 @@ data/
 __pycache__/
 *.pyc
 
-# Node
+# Node / Expo
 node_modules/
 dist/
+.expo/
 
 # Audio files, wherever they end up
 *.wav
