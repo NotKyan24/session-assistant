@@ -2,7 +2,7 @@ Session Assistant: a self-hosted tool that records counseling and meeting sessio
 
 ## Stack
 
-- `backend/`: Python 3.11 + FastAPI. WhisperX runs locally on an Apple M3 MacBook: CPU only, model `small`, compute_type `int8`, language `en`.
+- `backend/`: Python 3.12 (python.org build, venv in `backend/.venv`) + FastAPI. WhisperX runs locally on an Apple M3 MacBook: CPU only, model `small`, compute_type `int8`, language `en`.
 - `mobile/`: the existing Expo (React Native) app, tested in Expo Go. Keep it; never replace it with a web framework.
 - The phone reaches the backend over local Wi-Fi at the Mac's IP, set in one config value: `EXPO_PUBLIC_API_URL` in `mobile/.env` (not localhost).
 - `data/`: gitignored. `audio/` and `sessions/` (one JSON file per session, no database).
@@ -17,6 +17,16 @@ Session Assistant: a self-hosted tool that records counseling and meeting sessio
 - WhisperX's API changes between versions: read the installed version's README before writing diarization code; never guess.
 - Use Expo libraries that work in Expo Go.
 - Show a short plan before writing code for each phase.
+
+## Planned: summarization (after the backend works end to end)
+
+Requested by Joe (project manager), Oct 7, 2026. Don't build it until sessions, upload and transcription work end to end.
+
+- **Model:** Purple's local models. Still needed from Joe: where they run, how the backend reaches them, and confirmation that the data stays on approved machines. Never use a cloud API.
+- **When:** automatically after transcription, as one more stage: … → Identifying speakers → Summarizing → Ready.
+- **Format:** structured session notes under fixed headings (e.g. topics discussed, concerns raised, goals / next steps). Staff or Joe confirm the headings.
+- **Shape:** `backend/summarize.py` with one function, `summarize(segments) -> notes`, the same swappable pattern as `transcribe.py`. Save the notes next to the transcript in `data/sessions/`. Never log or commit them.
+- **App:** a Summary section on the Transcript screen.
 
 ## Expo (mobile/): do not trust your training data
 
