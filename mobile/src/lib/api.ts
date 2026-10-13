@@ -1,0 +1,132 @@
+/**
+ * API LAYER: the one place the app talks to the backend.
+ *
+ * Screens never call `fetch` directly. They call the four functions on `api`,
+ * which match the backend's four endpoints:
+ *   createSession  → POST /api/sessions               (Setup screen)
+ *   uploadAudio    → POST /api/sessions/{id}/audio    (Record screen)
+ *   getSession     → GET  /api/sessions/{id}          (Status screen, polled)
+ *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
+ *
+ * Two implementations share the same shape (the `Api` type):
+ * - `httpApi` makes real network calls to EXPO_PUBLIC_API_URL (the Mac's
+ *   address on local Wi-Fi, set in mobile/.env).
+ * - `mockApi` (mock-api.ts) simulates the backend on the phone.
+ * The last line of this file picks one: mock when no URL is set, real
+ * otherwise. Switching to the real backend is a config change; no screen
+ * code changes.
+ *
+ * The types below describe the data exchanged with the backend.
+ */
+import { mockApi } from "./mock-api";
+
+// "Where" the session happens, chosen on the Setup screen.
+export type SessionMode = "in_person" | "video";
+
+// The backend's processing stages, in order. "created" means no audio yet.
+export type Stage =
+  | "created"
+  | "uploaded"
+  | "converting"
+  | "transcribing"
+  | "aligning"
+  | "identifying_speakers"
+  | "ready"
+  | "failed";
+
+// What the Setup screen sends to create a session.
+export type NewSession = {
+  name: string;
+  mode: SessionMode;
+  participants: { id: string; label: string; consented: boolean }[];
+};
+
+// What the Status screen gets back each time it polls.
+export type SessionStatus = {
+  id: string;
+  name: string;
+  status: Stage;
+  stage: Stage;
+  /** Stage that failed, when status is "failed". */
+  failed_stage?: Stage;
+  // Why it failed (shown to the user).
+  error?: string | null;
+  // Non-fatal problems, e.g. speakers couldn't be identified.
+  warnings?: string[];
+};
+
+// One line of the transcript: who spoke, when (in seconds), and what they said.
+export type Segment = {
+  speaker: string;
+  start: number;
+  end: number;
+  text: string;
+};
+
+// A file on the phone, ready to upload: where it is, its name and its type.
+export type AudioFile = {
+  uri: string;
+  name: string;
+  mimeType: string;
+};
+
+// The contract both implementations follow.
+export type Api = {
+  createSession(session: NewSession): Promise<{ id: string }>;
+  uploadAudio(id: string, file: AudioFile): Promise<void>;
+  getSession(id: string): Promise<SessionStatus>;
+  getTranscript(id: string): Promise<Segment[]>;
+};
+
+// Read from mobile/.env when the app starts (restart Expo after changing it).
+// A trailing slash is dropped so paths join cleanly.
+const API_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
+
+/** True when no backend URL is configured and the app runs on simulated data. */
+export const isMock = !API_URL;
+
+// Shared helper for real calls: sends the request, and on an error status
+// turns the backend's message (FastAPI's `detail` field) into an Error the
+// screens can show.
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, init);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      // Not JSON; keep the status line.
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as T;
+}
+
+// The real implementation: plain HTTP calls to the FastAPI backend.
+const httpApi: Api = {
+  createSession: (session) =>
+    request("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(session),
+    }),
+
+  // Uploads go as multipart form data, the standard way to send a file over HTTP.
+  async uploadAudio(id, file) {
+    const form = new FormData();
+    // React Native's FormData accepts a { uri, name, type } file descriptor.
+    form.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+    await request(`/api/sessions/${id}/audio`, { method: "POST", body: form });
+  },
+
+  getSession: (id) => request(`/api/sessions/${id}`),
+
+  getTranscript: async (id) => {
+    const body = await request<{ segments: Segment[] }>(`/api/sessions/${id}/transcript`);
+    return body.segments;
+  },
+};
+
+// The switch: screens import `api` and never need to know which one they got.
+export const api: Api = isMock ? mockApi : httpApi;
