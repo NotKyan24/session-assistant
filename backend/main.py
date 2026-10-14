@@ -11,6 +11,7 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     POST /api/sessions/{id}/audio         upload the recording; starts transcription
     GET  /api/sessions/{id}               status + current stage (the app polls this)
     GET  /api/sessions/{id}/transcript    the segments, once status is "ready"
+    GET  /api/sessions/{id}/summary       the structured session notes, once "ready"
     GET  /api/health                      quick "is the server up?" check
 
 Transcription runs in a single background worker thread: one job at a time,
@@ -19,10 +20,12 @@ job runs.
 
 A session's status moves through:
     created → uploaded → converting → transcribing → aligning
-            → identifying_speakers → ready   (or → failed at any step)
+            → identifying_speakers → summarizing → ready   (or → failed)
+If summarizing fails, the session is still "ready" with its transcript, plus
+a warning that the summary is missing.
 
 Privacy: logs show session ids, stages and timings only, never transcript
-text, session names or participant labels.
+text, summaries, session names or participant labels.
 """
 
 import config  # noqa: F401  (must come first: loads .env and sets env flags)
@@ -35,9 +38,11 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import sessions
+import summarize as summarizer
 import transcribe as engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -45,7 +50,7 @@ log = logging.getLogger("session_assistant")
 
 # Stages while a job is running. A session stuck in one of these after a
 # restart was interrupted, and is marked failed at startup.
-PROCESSING_STAGES = ("uploaded", "converting", "transcribing", "aligning", "identifying_speakers")
+PROCESSING_STAGES = ("uploaded", "converting", "transcribing", "aligning", "identifying_speakers", "summarizing")
 
 # Audio formats we accept, by file extension. ffmpeg converts all of them.
 ALLOWED_EXTENSIONS = {".m4a", ".mp3", ".wav", ".webm", ".mp4", ".aac", ".caf", ".ogg", ".flac"}
@@ -81,6 +86,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Session Assistant", lifespan=lifespan)
+
+# Let the Expo *web* build (a browser page at localhost:8081) call this API.
+# Browsers ask permission first with an OPTIONS "preflight" request; this
+# answers it. Only the listed addresses are allowed (see config.CORS_ORIGINS).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 # ---------- Request bodies (validated automatically by FastAPI) ----------
@@ -158,9 +173,19 @@ def _run_job(session_id: str, audio_path: Path) -> None:
             # More speakers than participants is impossible, so cap detection there.
             max_speakers=len(session["participants"]),
         )
+        sessions.save_transcript(session_id, segments)
+
+        # Summarizing is a bonus: if it fails, the transcript is still delivered.
+        if segments:
+            on_stage("summarizing")
+            try:
+                sessions.save_summary(session_id, summarizer.summarize(segments))
+            except summarizer.SummaryError as exc:
+                on_warning(f"No summary for this session: {exc}")
+                log.info("Session %s: summary skipped (%s)", session_id, exc)
+
         timings[current["stage"]] = round(time.monotonic() - stage_started, 1)
         timings["total"] = round(time.monotonic() - job_started, 1)
-        sessions.save_transcript(session_id, segments)
         sessions.update(session_id, status="ready", stage="ready", timings=timings, segment_count=len(segments))
         log.info("Session %s: ready in %.1fs (%d segments)", session_id, timings["total"], len(segments))
     except engine.TranscriptionError as exc:
@@ -185,7 +210,12 @@ def _run_job(session_id: str, audio_path: Path) -> None:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "models_loaded": engine.models_loaded(), "ffmpeg": bool(config.FFMPEG)}
+    return {
+        "ok": True,
+        "models_loaded": engine.models_loaded(),
+        "ffmpeg": bool(config.FFMPEG),
+        "summaries_configured": summarizer.is_configured(),
+    }
 
 
 @app.post("/api/sessions", status_code=201)
@@ -278,3 +308,14 @@ def get_transcript(session_id: str) -> dict:
     if segments is None:
         raise HTTPException(status_code=500, detail="The transcript file is missing.")
     return {"segments": segments}
+
+
+@app.get("/api/sessions/{session_id}/summary")
+def get_summary(session_id: str) -> dict:
+    session = _get_session_or_404(session_id)
+    if session["status"] != "ready":
+        raise HTTPException(status_code=409, detail="The summary isn't ready yet.")
+    notes = sessions.load_summary(session_id)
+    if notes is None:
+        raise HTTPException(status_code=404, detail="There's no summary for this session.")
+    return {"summary": notes}

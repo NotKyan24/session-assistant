@@ -42,9 +42,22 @@ WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
 # Only needed to download the pyannote model the first time; offline runs use the cache.
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 
+# --- Summaries (Purple Maia's OpenAI-compatible model server; see summarize.py) ---
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "lcpp-qwen3.6-27b-q4-ud-kxl-262k")
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4000"))
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "300"))
+
 # --- Uploads ---
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+# --- Web testing ---
+# Browsers only let a web page call another address (this server) if the server
+# lists the page's address here (CORS). The Expo web build runs at
+# localhost:8081. The phone app (Expo Go) doesn't need this. Comma-separated.
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:8081").split(",") if o.strip()]
 
 # --- Data folders (gitignored) ---
 # DATA_DIR is relative to backend/, so the default "../data" is the repo's data/ folder.

@@ -7,6 +7,7 @@
  *   uploadAudio    → POST /api/sessions/{id}/audio    (Record screen)
  *   getSession     → GET  /api/sessions/{id}          (Status screen, polled)
  *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
+ *   getSummary     → GET  /api/sessions/{id}/summary    (Transcript screen)
  *
  * Two implementations share the same shape (the `Api` type):
  * - `httpApi` makes real network calls to EXPO_PUBLIC_API_URL (the Mac's
@@ -18,6 +19,8 @@
  *
  * The types below describe the data exchanged with the backend.
  */
+import { Platform } from "react-native";
+
 import { mockApi } from "./mock-api";
 
 // "Where" the session happens, chosen on the Setup screen.
@@ -31,6 +34,7 @@ export type Stage =
   | "transcribing"
   | "aligning"
   | "identifying_speakers"
+  | "summarizing"
   | "ready"
   | "failed";
 
@@ -63,6 +67,15 @@ export type Segment = {
   text: string;
 };
 
+// Structured session notes written by the summary model (see backend/summarize.py).
+// The headings come from the backend, so the app shows whatever sections it sends.
+export type Summary = {
+  overview: string;
+  sections: { title: string; items: string[] }[];
+  model: string;
+  created_at: string;
+};
+
 // A file on the phone, ready to upload: where it is, its name and its type.
 export type AudioFile = {
   uri: string;
@@ -76,6 +89,8 @@ export type Api = {
   uploadAudio(id: string, file: AudioFile): Promise<void>;
   getSession(id: string): Promise<SessionStatus>;
   getTranscript(id: string): Promise<Segment[]>;
+  /** null when the session has no summary (e.g. the summary model was unavailable). */
+  getSummary(id: string): Promise<Summary | null>;
 };
 
 // Read from mobile/.env when the app starts (restart Expo after changing it).
@@ -115,8 +130,15 @@ const httpApi: Api = {
   // Uploads go as multipart form data, the standard way to send a file over HTTP.
   async uploadAudio(id, file) {
     const form = new FormData();
-    // React Native's FormData accepts a { uri, name, type } file descriptor.
-    form.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+    if (Platform.OS === "web") {
+      // Browsers need the actual file data: read the recording's blob: URL into a Blob.
+      const blob = await (await fetch(file.uri)).blob();
+      form.append("file", blob, file.name);
+    } else {
+      // On the phone, React Native's FormData accepts a { uri, name, type } descriptor
+      // and streams the file from disk itself.
+      form.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+    }
     await request(`/api/sessions/${id}/audio`, { method: "POST", body: form });
   },
 
@@ -125,6 +147,17 @@ const httpApi: Api = {
   getTranscript: async (id) => {
     const body = await request<{ segments: Segment[] }>(`/api/sessions/${id}/transcript`);
     return body.segments;
+  },
+
+  getSummary: async (id) => {
+    try {
+      const body = await request<{ summary: Summary }>(`/api/sessions/${id}/summary`);
+      return body.summary;
+    } catch (e) {
+      // The backend answers "no summary" with a 404 message; treat it as "none", not an error.
+      if (e instanceof Error && e.message.startsWith("There's no summary")) return null;
+      throw e;
+    }
   },
 };
 

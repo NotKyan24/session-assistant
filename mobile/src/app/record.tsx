@@ -33,7 +33,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/button";
 import { LevelMeter } from "@/components/level-meter";
@@ -124,8 +124,13 @@ export default function RecordScreen() {
       setPhase("idle");
       return;
     }
-    // .m4a files use the MP4 container, so their MIME type is audio/mp4.
-    await upload({ uri: recorder.uri, name: `${id}.m4a`, mimeType: "audio/mp4" });
+    // Phones record .m4a (the MP4 container, so audio/mp4). The web build records
+    // with the browser's MediaRecorder, which gives .webm. The backend converts either.
+    const file =
+      Platform.OS === "web"
+        ? { uri: recorder.uri, name: `${id}.webm`, mimeType: "audio/webm" }
+        : { uri: recorder.uri, name: `${id}.m4a`, mimeType: "audio/mp4" };
+    await upload(file);
   }
 
   // "Choose a file instead": open the system picker, limited to audio files.
@@ -144,7 +149,7 @@ export default function RecordScreen() {
     setPhase("uploading");
     try {
       await api.uploadAudio(id, file);
-      router.replace({ pathname: "/status", params: { id } });
+      router.replace({ pathname: "/processing", params: { id } });
     } catch (e) {
       setError(e instanceof Error ? `Upload failed: ${e.message}` : "Upload failed.");
       setPhase("idle");

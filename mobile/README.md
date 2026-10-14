@@ -14,8 +14,8 @@ Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready�
 | --- | --- | --- | --- |
 | 1 | `src/app/index.tsx` | Name the session, pick in person/video, tick consent for everyone. Start stays disabled until all are ticked. | `createSession` |
 | 2 | `src/app/record.tsx` | Record with pause/resume, or choose an existing file. The screen stays awake while recording. | `uploadAudio` |
-| 3 | `src/app/status.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
-| 4 | `src/app/transcript.tsx` | Shows `[mm:ss] Speaker 1: text`, one color per speaker. | `getTranscript` |
+| 3 | `src/app/processing.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
+| 4 | `src/app/transcript.tsx` | AI session notes at the top (if available), then `[mm:ss] Speaker 1: text`, one color per speaker. | `getSummary`, `getTranscript` |
 
 ## How the code is organized
 
@@ -24,12 +24,13 @@ src/
   app/              screens (Expo Router: each file is a screen, named by its path)
     _layout.tsx     the navigator that stacks the screens
     index.tsx       Setup        record.tsx   Record
-    status.tsx      Status       transcript.tsx Transcript
+    processing.tsx  Status       transcript.tsx Transcript
   components/       reusable pieces of UI
     button.tsx        the one button style
     consent-row.tsx   a participant's consent checkbox
     level-meter.tsx   the microphone loudness bar
     stage-list.tsx    the processing checklist
+    summary-card.tsx  the AI-written session notes
   lib/              logic with no UI
     api.ts            the only code that talks to the backend
     mock-api.ts       the simulated backend for demo mode

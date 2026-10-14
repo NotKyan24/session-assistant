@@ -11,12 +11,13 @@
  * - "Uploads" by recording the time. Nothing leaves the phone, and the audio
  *   isn't read at all.
  * - Works out the current stage from how long ago the upload happened, using
- *   the timings in STAGE_SECONDS (about 12 seconds in total).
- * - Returns a fixed sample transcript (a made-up check-in) once "ready".
+ *   the timings in STAGE_SECONDS (about 14 seconds in total).
+ * - Returns a fixed sample transcript and sample session notes (a made-up
+ *   check-in) once "ready".
  * - Simulates a failure at the Converting stage if the uploaded file's name
  *   contains "fail", to test the failure screen.
  */
-import type { Api, Segment, SessionStatus, Stage } from "./api";
+import type { Api, Segment, SessionStatus, Stage, Summary } from "./api";
 
 // How long each simulated stage lasts, in seconds, in order.
 const STAGE_SECONDS: [Stage, number][] = [
@@ -25,6 +26,7 @@ const STAGE_SECONDS: [Stage, number][] = [
   ["transcribing", 4],
   ["aligning", 2],
   ["identifying_speakers", 3],
+  ["summarizing", 2],
 ];
 
 // What the mock remembers about each session.
@@ -50,6 +52,20 @@ const SAMPLE_TRANSCRIPT: Segment[] = [
   { speaker: "SPEAKER_01", start: 24.5, end: 30.6, text: "Mostly. The first try was still cloudy, so we added another layer of sand." },
   { speaker: "SPEAKER_00", start: 31.2, end: 35.9, text: "That sounds like good problem solving." },
 ];
+
+// Same shape as backend/summarize.py produces.
+const SAMPLE_SUMMARY: Summary = {
+  overview:
+    "A weekly check-in. Speaker 2 finished a science project and has moved to midfield on their team. They're sleeping a little better after putting their phone away earlier.",
+  sections: [
+    { title: "Topics discussed", items: ["Science project (water filter)", "Sports team and new position", "Sleep and morning tiredness"] },
+    { title: "Concerns raised", items: ["Feeling tired in the mornings (improving)"] },
+    { title: "Goals / next steps", items: ["Start the reading assignment early instead of Sunday night"] },
+    { title: "Follow-ups", items: ["Check in on the reading assignment next session"] },
+  ],
+  model: "demo",
+  created_at: "2026-10-14T00:00:00Z",
+};
 
 // Small waits so the app shows its loading states, like over a real network.
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,5 +132,12 @@ export const mockApi: Api = {
     if (!session) throw new Error("Session not found");
     if (currentStatus(session).status !== "ready") throw new Error("Transcript not ready");
     return SAMPLE_TRANSCRIPT;
+  },
+
+  async getSummary(id) {
+    const session = sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    if (currentStatus(session).status !== "ready") throw new Error("Summary not ready");
+    return SAMPLE_SUMMARY;
   },
 };

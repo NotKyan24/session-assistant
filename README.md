@@ -1,6 +1,6 @@
 # Session Assistant
 
-A self-hosted tool that records counseling and meeting sessions and transcribes them with speaker labels. Everything runs locally: audio and transcripts never leave this Mac and phone.
+A self-hosted tool that records counseling and meeting sessions, transcribes them with speaker labels, and writes structured session notes. Audio and transcription stay on this Mac and phone. For the notes, the transcript text is sent to Purple Maia's model server (see AGENTS.md).
 
 ## Layout
 
@@ -51,6 +51,7 @@ cd backend && python smoke_test.py ../data/audio/test.wav
 | --- | --- |
 | `main.py` | The API endpoints and the background job queue (one job at a time) |
 | `transcribe.py` | The only file that uses WhisperX: convert → transcribe → align → identify speakers |
+| `summarize.py` | The only file that calls the summary model (Purple's llm.labs server). It writes structured session notes; to change the headings, edit `SECTIONS` there. If it fails, the transcript still arrives, with a warning. |
 | `sessions.py` | Reads and writes `data/sessions/<id>.json` and `<id>.transcript.json` |
 | `config.py` | Loads `.env` and sets the folder paths |
 | `smoke_test.py` | End-to-end check against a running server |
@@ -75,7 +76,7 @@ Restart `npx expo start` after changing `mobile/.env`.
 
 ## Privacy rules
 
-- No cloud APIs. Audio and transcripts stay on this Mac and phone.
+- No cloud APIs. Audio stays on this Mac and phone. Transcript text goes only to Purple Maia's model server, for session notes, and only to Purple-controlled models (never `cloud-…`).
 - Never commit audio, transcripts, session data or tokens.
 - Never log transcript text.
 - Participants are stored by ID (e.g. `youth-001`); names are display-only.

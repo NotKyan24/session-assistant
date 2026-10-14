@@ -2,7 +2,8 @@
  * STATUS SCREEN (flow step 3 of 4): Setup → Record → **Status** → Transcript
  *
  * After the upload, the backend works through the audio in stages:
- *   Uploading → Converting → Transcribing → Aligning → Identifying speakers → Ready
+ *   Uploading → Converting → Transcribing → Aligning → Identifying speakers
+ *   → Summarizing → Ready
  * This screen asks the backend "where are you?" every 3 seconds (polling) and
  * highlights the current stage.
  *
@@ -10,6 +11,10 @@
  * - Failed: shows which stage failed and the error message, plus "New session".
  * - Network trouble: shows a note and keeps trying.
  * Polling stops on ready or failed, and when the user leaves the screen.
+ *
+ * The file is named processing.tsx (route "/processing") rather than status:
+ * in the web build, "/status" is the Expo dev server's own health-check
+ * address, so a page there can't be opened or refreshed.
  */
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";

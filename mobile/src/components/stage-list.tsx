@@ -19,6 +19,7 @@ export const STAGES: { key: Stage; label: string }[] = [
   { key: "transcribing", label: "Transcribing" },
   { key: "aligning", label: "Aligning" },
   { key: "identifying_speakers", label: "Identifying speakers" },
+  { key: "summarizing", label: "Summarizing" },
   { key: "ready", label: "Ready" },
 ];
 

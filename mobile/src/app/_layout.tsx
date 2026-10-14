@@ -2,7 +2,7 @@
  * ROOT LAYOUT: the app's navigator.
  *
  * Expo Router turns every file in src/app/ into a screen, named after the file:
- *   index.tsx → "/" (Setup) · record.tsx → "/record" · status.tsx → "/status"
+ *   index.tsx → "/" (Setup) · record.tsx → "/record" · processing.tsx → "/processing" (Status)
  *   transcript.tsx → "/transcript"
  * This file wraps them in a Stack: each new screen slides in on top of the
  * last, with a header bar and a back button.
@@ -28,7 +28,7 @@ export default function RootLayout() {
     >
       <Stack.Screen name="index" options={{ title: "New session" }} />
       <Stack.Screen name="record" options={{ title: "Record" }} />
-      <Stack.Screen name="status" options={{ title: "Processing", headerBackVisible: false, gestureEnabled: false }} />
+      <Stack.Screen name="processing" options={{ title: "Processing", headerBackVisible: false, gestureEnabled: false }} />
       <Stack.Screen name="transcript" options={{ title: "Transcript", headerBackVisible: false, gestureEnabled: false }} />
     </Stack>
   );

@@ -6,6 +6,7 @@ Files, all in data/sessions/ (gitignored):
                           status, stage, errors, warnings, timings
     <id>.transcript.json  the transcript segments, once ready (kept separate so
                           the status file stays small and is easy to delete)
+    <id>.summary.json     the structured session notes, if summarizing worked
 
 Writes go to a temporary file first and then replace the real file in one
 step, so a crash can never leave a half-written session behind. A lock stops
@@ -50,6 +51,10 @@ def _session_path(session_id: str) -> Path:
 
 def _transcript_path(session_id: str) -> Path:
     return config.SESSIONS_DIR / f"{session_id}.transcript.json"
+
+
+def _summary_path(session_id: str) -> Path:
+    return config.SESSIONS_DIR / f"{session_id}.summary.json"
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -99,7 +104,7 @@ def all_sessions() -> list[dict]:
         return [
             s
             for p in config.SESSIONS_DIR.glob("*.json")
-            if not p.name.endswith(".transcript.json") and (s := _read_json(p)) is not None
+            if not p.name.endswith((".transcript.json", ".summary.json")) and (s := _read_json(p)) is not None
         ]
 
 
@@ -112,3 +117,13 @@ def load_transcript(session_id: str) -> list[dict] | None:
         return None
     data = _read_json(_transcript_path(session_id))
     return None if data is None else data["segments"]
+
+
+def save_summary(session_id: str, notes: dict) -> None:
+    _write_json(_summary_path(session_id), notes)
+
+
+def load_summary(session_id: str) -> dict | None:
+    if not is_valid_id(session_id):
+        return None
+    return _read_json(_summary_path(session_id))

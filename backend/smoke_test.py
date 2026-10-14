@@ -9,9 +9,11 @@ Use consented or synthetic audio only.
 Checks:
 1. A session missing someone's consent is rejected (400).
 2. A non-audio upload is rejected (415).
-3. The real flow: create → upload → poll every 3 s until ready → fetch transcript.
+3. The real flow: create → upload → poll every 3 s until ready → fetch the
+   transcript and the summary (if the summary model was reachable).
 
-Prints statuses, timings and speaker counts. It never prints transcript text.
+Prints statuses, timings, speaker and section counts. It never prints
+transcript or summary text.
 Uses only the Python standard library.
 """
 
@@ -109,6 +111,15 @@ def main() -> None:
     speakers = sorted({s["speaker"] for s in segments})
     check("transcript returned", status == 200 and len(segments) > 0, f"{len(segments)} segments")
     print(f"       speakers: {', '.join(speakers)}")
+
+    status, body = call("GET", f"{base}/api/sessions/{session_id}/summary")
+    if status == 200:
+        notes = body["summary"]
+        counts = ", ".join(f"{s['title']}: {len(s['items'])}" for s in notes["sections"])
+        check("summary returned", bool(notes["overview"]), f"model {notes['model']}")
+        print(f"       items per section: {counts}")
+    else:
+        print(f"[INFO] no summary ({body.get('detail', status)}); see the warning above")
 
 
 if __name__ == "__main__":
