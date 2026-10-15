@@ -9,7 +9,7 @@ Session Assistant: a self-hosted tool that records counseling and meeting sessio
 
 ## Rules
 
-- No cloud APIs. Audio never leaves this Mac and phone. Transcripts stay local too, except for summarization: transcript text may go only to Purple Maia's model server (`LLM_BASE_URL`, currently llm.labs.purplemaia.org) over HTTPS. Kyan has permission to send data there. Use only Purple-controlled models: `lcpp-…` (Purple's server on the Jetstream2 research cloud) or, if David confirms, `meshllm/…`. Never `cloud-…` models: they forward to outside companies (api.synthetic.new, ollama.com).
+- No cloud APIs. Audio never leaves this Mac and phone. Transcripts stay local too, except for summarization: transcript text may go only to Purple Maia's model server (`LLM_BASE_URL`, currently lmstudio-oahu.purplemaia.org, which sits behind Cloudflare) over HTTPS. Kyan has permission to send data there. Use only Purple-controlled models (the chosen one is `m3-ult-…`, which by its name runs on an M3 Ultra Mac, pending David's confirmation). Never `cloud-…`, `cloud-syn:…` or `chatgpt-…` models: they forward to outside companies (api.synthetic.new, ollama.com, OpenAI).
 - Never commit audio, transcripts, session data or tokens. Keep them in the gitignored `data/` folder and `.env`.
 - Never log transcript text. Logs carry stages and timings only.
 - Participants are stored by ID (e.g. `youth-001`); names are display-only.
@@ -22,7 +22,7 @@ Session Assistant: a self-hosted tool that records counseling and meeting sessio
 
 Requested by Joe (project manager), Oct 7, 2026. Don't build it until sessions, upload and transcription work end to end.
 
-- **Model:** Purple's model server, reached through `LLM_BASE_URL` + `LLM_API_KEY` in `.env` (an OpenAI-compatible LiteLLM gateway). Planned model: `lcpp-qwen3.6-27b-q4-ud-kxl-262k` (llama.cpp on Purple's Jetstream2 server, 262k-token context, so a whole session fits in one request), set by `LLM_MODEL`. Avoid `cloud-…` models.
+- **Model:** `m3-ult-qwen3.6-35b-a3b-ud-q6kl-mtp2-262k` on lmstudio-oahu.purplemaia.org (Kyan chose it on Oct 15, 2026, after comparing it with `meshllm` and `m3-ult-qwen3.6-27b` on a synthetic clip: about 18 s per summary, a 262k context so a whole session fits in one request). It's reached through `LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL` in `.env` (an OpenAI-compatible LiteLLM gateway). The fallback is llm.labs.purplemaia.org. Open questions for David: whether `m3-ult` is Purple-owned, and whether Cloudflare in the path is acceptable.
 - **When:** automatically after transcription, as one more stage: … → Identifying speakers → Summarizing → Ready.
 - **Format:** structured session notes under fixed headings (e.g. topics discussed, concerns raised, goals / next steps). Staff or Joe confirm the headings.
 - **Shape:** `backend/summarize.py` with one function, `summarize(segments) -> notes`, the same swappable pattern as `transcribe.py`. Save the notes next to the transcript in `data/sessions/`. Never log or commit them.

@@ -45,7 +45,7 @@ HF_TOKEN = os.getenv("HF_TOKEN") or None
 # --- Summaries (Purple Maia's OpenAI-compatible model server; see summarize.py) ---
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "lcpp-qwen3.6-27b-q4-ud-kxl-262k")
+LLM_MODEL = os.getenv("LLM_MODEL", "m3-ult-qwen3.6-35b-a3b-ud-q6kl-mtp2-262k")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4000"))
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "300"))
 
