@@ -44,12 +44,15 @@ import { useColors } from "@/lib/theme";
 // Names our keep-awake request, so we release exactly the one we turned on.
 const KEEP_AWAKE_TAG = "recording";
 
-// Start from Expo's HIGH_QUALITY preset (AAC in an .m4a file, 44.1 kHz) and change two things:
-// - Mono: plenty for speech and half the upload size; WhisperX converts to mono anyway.
+// Start from Expo's HIGH_QUALITY preset (AAC in an .m4a file, 44.1 kHz) and change three things:
+// - Mono: plenty for speech; WhisperX converts to mono anyway.
+// - 64 kbps instead of 128: still clear for speech (WhisperX reduces audio to
+//   16 kHz anyway) and about 29 MB per hour, so multi-hour sessions stay small to upload.
 // - Metering on: the recorder reports a live loudness value, which drives the level meter.
 const RECORDING_OPTIONS: RecordingOptions = {
   ...RecordingPresets.HIGH_QUALITY,
   numberOfChannels: 1,
+  bitRate: 64000,
   isMeteringEnabled: true,
 };
 

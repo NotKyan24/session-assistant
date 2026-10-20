@@ -47,10 +47,14 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "m3-ult-qwen3.6-35b-a3b-ud-q6kl-mtp2-262k")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4000"))
-LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "300"))
+# Long sessions mean long transcripts (3 hours ≈ 40k tokens), so allow up to 15 minutes.
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "900"))
 
 # --- Uploads ---
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
+# Sessions can run for hours. The app records speech at 64 kbps (about 29 MB per
+# hour), so 2 GB leaves plenty of room, even for uncompressed WAV files picked
+# from elsewhere (16 kHz mono WAV is about 115 MB per hour).
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "2048"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 # --- Web testing ---
