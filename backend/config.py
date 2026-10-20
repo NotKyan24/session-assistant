@@ -57,6 +57,13 @@ LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "900"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "2048"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
+# --- Access key ---
+# Every /api request must send this in an "X-API-Key" header (the app reads its
+# copy from mobile/.env). Without it, anyone who can reach the server could use
+# it: on some networks (e.g. a university's), the Mac's address is public. If
+# no key is set, the server only accepts requests from this Mac itself.
+API_ACCESS_KEY = os.getenv("API_ACCESS_KEY", "")
+
 # --- Web testing ---
 # Browsers only let a web page call another address (this server) if the server
 # lists the page's address here (CORS). The Expo web build runs at

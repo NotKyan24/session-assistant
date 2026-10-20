@@ -6,7 +6,11 @@ SMOKE TEST: runs the whole backend flow against a running server.
 Default audio file: ../data/audio/test.wav (the Phase 0.5 synthetic clip).
 Use consented or synthetic audio only.
 
+The access key is read from API_ACCESS_KEY in the environment or ../.env
+(or pass --key). It is never printed.
+
 Checks:
+0. A request without the access key is rejected (401), when a key is set.
 1. A session missing someone's consent is rejected (400).
 2. A non-audio upload is rejected (415).
 3. The real flow: create → upload → poll every 3 s until ready → fetch the
@@ -19,6 +23,7 @@ Uses only the Python standard library.
 
 import argparse
 import json
+import os
 import mimetypes
 import sys
 import time
@@ -33,8 +38,29 @@ PARTICIPANTS = [
 ]
 
 
-def call(method: str, url: str, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict]:
-    req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+# Set in main(); sent with every request as the X-API-Key header.
+ACCESS_KEY = ""
+
+
+def read_access_key() -> str:
+    """API_ACCESS_KEY from the environment, else from the repo's .env file."""
+    if os.environ.get("API_ACCESS_KEY"):
+        return os.environ["API_ACCESS_KEY"]
+    env_file = Path(__file__).parent / "../.env"
+    if env_file.is_file():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("API_ACCESS_KEY="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
+def call(
+    method: str, url: str, body: bytes | None = None, headers: dict | None = None, send_key: bool = True
+) -> tuple[int, dict]:
+    headers = dict(headers or {})
+    if send_key and ACCESS_KEY:
+        headers["X-API-Key"] = ACCESS_KEY
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as res:
             return res.status, json.loads(res.read() or b"{}")
@@ -70,10 +96,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("audio", nargs="?", default=str(Path(__file__).parent / "../data/audio/test.wav"))
     parser.add_argument("--url", default="http://localhost:8000")
+    parser.add_argument("--key", default=None, help="access key (default: API_ACCESS_KEY from .env)")
     args = parser.parse_args()
     base = args.url.rstrip("/")
     audio = Path(args.audio)
     check("audio file exists", audio.is_file(), str(audio))
+
+    global ACCESS_KEY
+    ACCESS_KEY = args.key if args.key is not None else read_access_key()
+    if ACCESS_KEY:
+        status, _ = call("GET", f"{base}/api/sessions/{'0' * 32}", send_key=False)
+        check("request without the access key is rejected", status == 401)
+    else:
+        print("[INFO] no API_ACCESS_KEY found; testing as a request from this Mac")
 
     status, body = new_session(base, consent_all=False)
     check("missing consent is rejected", status == 400, body.get("detail", ""))

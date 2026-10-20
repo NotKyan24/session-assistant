@@ -97,6 +97,11 @@ export type Api = {
 // A trailing slash is dropped so paths join cleanly.
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
 
+// The backend's access key (API_ACCESS_KEY in the root .env), sent with every
+// request. EXPO_PUBLIC_ values are built into the app, so this keeps strangers
+// on the network out; it isn't a per-user password.
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY;
+
 /** True when no backend URL is configured and the app runs on simulated data. */
 export const isMock = !API_URL;
 
@@ -104,7 +109,9 @@ export const isMock = !API_URL;
 // turns the backend's message (FastAPI's `detail` field) into an Error the
 // screens can show.
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, init);
+  const headers = new Headers(init?.headers);
+  if (API_KEY) headers.set("X-API-Key", API_KEY);
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {

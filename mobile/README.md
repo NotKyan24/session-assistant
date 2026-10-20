@@ -46,7 +46,7 @@ Each file starts with a comment explaining its job.
 `src/lib/api.ts` decides where requests go:
 
 - **No `EXPO_PUBLIC_API_URL` set (today):** demo mode. `mock-api.ts` pretends to be the backend on the phone. Recording and file picking are real, but nothing is uploaded. The stages tick by over about 12 seconds, then a sample transcript appears. A picked file with "fail" in its name shows the failure screen. The Setup screen shows a "Demo mode" banner.
-- **`EXPO_PUBLIC_API_URL` set in `mobile/.env`:** real HTTP calls to the FastAPI backend on the Mac, over local Wi-Fi, e.g. `EXPO_PUBLIC_API_URL=http://192.168.1.20:8000`. `mobile/.env` is gitignored. Restart `npx expo start` after changing it.
+- **`EXPO_PUBLIC_API_URL` set in `mobile/.env`:** real HTTP calls to the FastAPI backend, sending `EXPO_PUBLIC_API_KEY` as the `X-API-Key` header on every request (it must match `API_ACCESS_KEY` in the root `.env`). On the phone, over local Wi-Fi, e.g. `EXPO_PUBLIC_API_URL=http://192.168.1.20:8000`. `mobile/.env` is gitignored. Restart `npx expo start` after changing it.
 
 No screen code changes between the two.
 

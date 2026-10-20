@@ -2,9 +2,13 @@
 SESSION ASSISTANT BACKEND: the FastAPI server the phone app talks to.
 
 Run it (from backend/, with the venv active):
-    uvicorn main:app --host 0.0.0.0 --port 8000
---host 0.0.0.0 lets the phone reach it over local Wi-Fi. Interactive API docs:
-http://localhost:8000/docs
+    uvicorn main:app --host 127.0.0.1 --port 8000      # this Mac only (browser testing)
+    uvicorn main:app --host 0.0.0.0 --port 8000        # phone testing over Wi-Fi
+--host 0.0.0.0 opens the server to the whole network, which on some networks
+(e.g. a university's public addresses) means the internet. Every /api request
+therefore needs the access key (API_ACCESS_KEY in .env, sent as an "X-API-Key"
+header). Interactive API docs: http://localhost:8000/docs (use "Authorize" to
+enter the key).
 
 Endpoints (the phone's src/lib/api.ts calls exactly these):
     POST /api/sessions                    create a session; 400 unless everyone consented
@@ -31,14 +35,16 @@ text, summaries, session names or participant labels.
 import config  # noqa: F401  (must come first: loads .env and sets env flags)
 
 import logging
+import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 import sessions
@@ -67,6 +73,8 @@ async def lifespan(app: FastAPI):
     """Runs once at startup (before `yield`) and once at shutdown (after it)."""
     if not config.FFMPEG:
         log.error("ffmpeg not found; uploads will fail. Install it with: brew install ffmpeg")
+    if not config.API_ACCESS_KEY:
+        log.warning("No API_ACCESS_KEY in .env: only requests from this Mac will be accepted.")
 
     for s in sessions.all_sessions():
         if s.get("status") in PROCESSING_STAGES:
@@ -94,7 +102,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 
@@ -111,6 +119,31 @@ class SessionIn(BaseModel):
     name: str = Field(min_length=1, max_length=200, examples=["Tue group, Oct 13"])
     mode: Literal["in_person", "video"]
     participants: list[ParticipantIn] = Field(min_length=1, max_length=50)
+
+
+# ---------- Access key ----------
+
+# Declared this way so the /docs page shows an "Authorize" button for the key.
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False, description="The API_ACCESS_KEY from .env")
+_LOCAL_CLIENTS = {"127.0.0.1", "::1"}
+
+
+def require_access(request: Request, key: str | None = Security(_api_key_header)) -> None:
+    """Let a request through only if it carries the right access key.
+
+    With no key configured, only requests from this Mac itself are allowed, so a
+    forgotten key never leaves the server open to the network.
+    """
+    if config.API_ACCESS_KEY:
+        if key and secrets.compare_digest(key.encode(), config.API_ACCESS_KEY.encode()):
+            return
+        raise HTTPException(status_code=401, detail="Missing or wrong access key.")
+    if request.client and request.client.host in _LOCAL_CLIENTS:
+        return
+    raise HTTPException(status_code=401, detail="This server has no access key set, so only this Mac can use it.")
+
+
+protected = [Depends(require_access)]
 
 
 # ---------- Helpers ----------
@@ -208,6 +241,8 @@ def _run_job(session_id: str, audio_path: Path) -> None:
 # ---------- Endpoints ----------
 
 
+# Health stays open (no key) so connection problems are easy to tell apart from
+# key problems. It shows nothing about sessions.
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -218,7 +253,7 @@ def health() -> dict:
     }
 
 
-@app.post("/api/sessions", status_code=201)
+@app.post("/api/sessions", status_code=201, dependencies=protected)
 def create_session(body: SessionIn) -> dict:
     missing = [p.id for p in body.participants if not p.consented]
     if missing:
@@ -248,7 +283,7 @@ def create_session(body: SessionIn) -> dict:
     return {"id": session["id"]}
 
 
-@app.post("/api/sessions/{session_id}/audio", status_code=202)
+@app.post("/api/sessions/{session_id}/audio", status_code=202, dependencies=protected)
 def upload_audio(session_id: str, file: UploadFile = File(...)) -> dict:
     session = _get_session_or_404(session_id)
     if session["status"] != "created":
@@ -294,12 +329,12 @@ def upload_audio(session_id: str, file: UploadFile = File(...)) -> dict:
     return {"id": session_id, "status": "uploaded"}
 
 
-@app.get("/api/sessions/{session_id}")
+@app.get("/api/sessions/{session_id}", dependencies=protected)
 def get_session(session_id: str) -> dict:
     return _public_view(_get_session_or_404(session_id))
 
 
-@app.get("/api/sessions/{session_id}/transcript")
+@app.get("/api/sessions/{session_id}/transcript", dependencies=protected)
 def get_transcript(session_id: str) -> dict:
     session = _get_session_or_404(session_id)
     if session["status"] != "ready":
@@ -310,7 +345,7 @@ def get_transcript(session_id: str) -> dict:
     return {"segments": segments}
 
 
-@app.get("/api/sessions/{session_id}/summary")
+@app.get("/api/sessions/{session_id}/summary", dependencies=protected)
 def get_summary(session_id: str) -> dict:
     session = _get_session_or_404(session_id)
     if session["status"] != "ready":
