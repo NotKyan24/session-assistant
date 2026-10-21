@@ -77,6 +77,8 @@ export default function RecordScreen() {
   const [permission, setPermission] = useState<Permission>("checking");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // 0-1 while a file is being sent, for "Uploading… 45%".
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // Runs once when the screen opens: ask for the microphone, then tell iOS we
   // intend to record (and to keep working even if the silent switch is on).
@@ -150,8 +152,9 @@ export default function RecordScreen() {
   // screen with Status, so "back" can't return to a finished recording.
   async function upload(file: AudioFile) {
     setPhase("uploading");
+    setUploadProgress(0);
     try {
-      await api.uploadAudio(id, file);
+      await api.uploadAudio(id, file, setUploadProgress);
       router.replace({ pathname: "/processing", params: { id } });
     } catch (e) {
       setError(e instanceof Error ? `Upload failed: ${e.message}` : "Upload failed.");
@@ -194,7 +197,7 @@ export default function RecordScreen() {
           : phase === "paused"
             ? "Paused"
             : phase === "uploading"
-              ? "Uploading…"
+              ? `Uploading… ${Math.floor((uploadProgress ?? 0) * 100)}%`
               : permission === "checking"
                 ? "Waiting for microphone permission…"
                 : "Ready to record"}

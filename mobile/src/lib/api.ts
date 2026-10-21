@@ -19,9 +19,8 @@
  *
  * The types below describe the data exchanged with the backend.
  */
-import { Platform } from "react-native";
-
 import { mockApi } from "./mock-api";
+import { uploadFile } from "./upload";
 
 // "Where" the session happens, chosen on the Setup screen.
 export type SessionMode = "in_person" | "video";
@@ -90,7 +89,8 @@ export type AudioFile = {
 // The contract both implementations follow.
 export type Api = {
   createSession(session: NewSession): Promise<{ id: string }>;
-  uploadAudio(id: string, file: AudioFile): Promise<void>;
+  /** onProgress gets 0-1 as the file is sent (on phones; the browser reports only the end). */
+  uploadAudio(id: string, file: AudioFile, onProgress?: (fraction: number) => void): Promise<void>;
   getSession(id: string): Promise<SessionStatus>;
   getTranscript(id: string): Promise<Segment[]>;
   /** null when the session has no summary (e.g. the summary model was unavailable). */
@@ -116,17 +116,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (API_KEY) headers.set("X-API-Key", API_KEY);
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
-  if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
-    } catch {
-      // Not JSON; keep the status line.
-    }
-    throw new Error(detail);
-  }
+  if (!res.ok) throw new Error(errorDetail(res.status, await res.text()));
   return (await res.json()) as T;
+}
+
+// FastAPI puts its error message in a "detail" field; fall back to the status code.
+function errorDetail(status: number, bodyText: string): string {
+  try {
+    const body = JSON.parse(bodyText);
+    if (body?.detail) return typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+  } catch {
+    // Not JSON; use the status code.
+  }
+  return `Server error (HTTP ${status})`;
 }
 
 // The real implementation: plain HTTP calls to the FastAPI backend.
@@ -139,18 +141,12 @@ const httpApi: Api = {
     }),
 
   // Uploads go as multipart form data, the standard way to send a file over HTTP.
-  async uploadAudio(id, file) {
-    const form = new FormData();
-    if (Platform.OS === "web") {
-      // Browsers need the actual file data: read the recording's blob: URL into a Blob.
-      const blob = await (await fetch(file.uri)).blob();
-      form.append("file", blob, file.name);
-    } else {
-      // On the phone, React Native's FormData accepts a { uri, name, type } descriptor
-      // and streams the file from disk itself.
-      form.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
-    }
-    await request(`/api/sessions/${id}/audio`, { method: "POST", body: form });
+  // upload.ts (browser) and upload.native.ts (phone) do the sending; Expo picks
+  // the right one for the platform.
+  async uploadAudio(id, file, onProgress) {
+    const headers: Record<string, string> = API_KEY ? { "X-API-Key": API_KEY } : {};
+    const { status, body } = await uploadFile(`${API_URL}/api/sessions/${id}/audio`, file, headers, onProgress);
+    if (status < 200 || status >= 300) throw new Error(errorDetail(status, body));
   },
 
   getSession: (id) => request(`/api/sessions/${id}`),

@@ -116,10 +116,14 @@ export const mockApi: Api = {
     return { id };
   },
 
-  async uploadAudio(id, file) {
+  async uploadAudio(id, file, onProgress) {
     const session = sessions.get(id);
     if (!session) throw new Error("Session not found");
-    await delay(800);
+    // Pretend to send the file in a few steps so the progress display can be seen.
+    for (const fraction of [0.25, 0.5, 0.75, 1]) {
+      await delay(200);
+      onProgress?.(fraction);
+    }
     session.uploadedAt = Date.now();
     session.shouldFail = file.name.toLowerCase().includes("fail");
   },
