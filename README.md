@@ -2,6 +2,8 @@
 
 A self-hosted tool that records counseling and meeting sessions, transcribes them with speaker labels, and writes structured session notes. Audio and transcription stay on this Mac and phone. For the notes, the transcript text is sent to Purple Maia's model server (see AGENTS.md).
 
+What's planned next, and the open questions for Joe: see [ROADMAP.md](ROADMAP.md).
+
 ## Layout
 
 ```
