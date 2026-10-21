@@ -26,3 +26,13 @@ export function speakerName(speaker: string): string {
   const match = /^SPEAKER_(\d+)$/.exec(speaker);
   return match ? `Speaker ${Number(match[1]) + 1}` : speaker;
 }
+
+/** Seconds to a rough "time left" phrase, e.g. "about 12 min left". */
+export function formatTimeLeft(seconds: number): string {
+  if (seconds < 60) return "less than a minute left";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `about ${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `about ${hours} h ${rest} min left` : `about ${hours} h left`;
+}

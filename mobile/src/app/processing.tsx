@@ -72,7 +72,12 @@ export default function StatusScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       {session && <Text style={[styles.title, { color: colors.text }]}>{session.name}</Text>}
 
-      <StageList current={session?.stage ?? "uploaded"} failedAt={failed ? (session?.failed_stage ?? "converting") : undefined} />
+      <StageList
+        current={session?.stage ?? "uploaded"}
+        failedAt={failed ? (session?.failed_stage ?? "converting") : undefined}
+        progress={session?.progress}
+        secondsLeft={session?.seconds_left}
+      />
 
       {pollError && (
         <Text style={[styles.body, { color: colors.danger }]}>Still trying to reach the server: {pollError}</Text>

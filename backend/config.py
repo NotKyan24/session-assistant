@@ -39,6 +39,12 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 WHISPER_LANGUAGE = "en"  # Fixed: auto-detect misfires on Pidgin/English code-switching.
 WHISPER_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "8"))
 
+# Speaker identification (pyannote) can use the Mac's GPU ("mps"), which was
+# about 3x faster than the CPU in testing (29 s vs 90 s on a 74 s clip). Whisper
+# itself can't use the Mac GPU, and alignment was slower on it, so both stay on
+# WHISPER_DEVICE. "auto" picks mps when this Mac has it, otherwise the CPU.
+DIARIZE_DEVICE = os.getenv("DIARIZE_DEVICE", "auto")
+
 # Only needed to download the pyannote model the first time; offline runs use the cache.
 HF_TOKEN = os.getenv("HF_TOKEN") or None
 

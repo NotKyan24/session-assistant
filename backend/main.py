@@ -64,6 +64,12 @@ ALLOWED_EXTENSIONS = {".m4a", ".mp3", ".wav", ".webm", ".mp4", ".aac", ".caf", "
 # or a generic binary type), so these are allowed too.
 ALLOWED_GENERIC_TYPES = {"application/octet-stream", "video/mp4", "video/webm", ""}
 
+# Progress is saved at most this often, so long jobs don't rewrite the session
+# file hundreds of times a second. The app polls every 3 s anyway.
+PROGRESS_SAVE_SECONDS = 2.0
+# Below this much progress, a time estimate is mostly noise, so none is given.
+MIN_PROGRESS_FOR_ESTIMATE = 3.0
+
 # One worker = one transcription at a time.
 worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe")
 
@@ -156,6 +162,19 @@ def _get_session_or_404(session_id: str) -> dict:
     return session
 
 
+def _estimate_seconds_left(session: dict) -> int | None:
+    """Rough time left in the current stage, from how fast it has progressed so far.
+
+    E.g. 25% done after 5 minutes → about 15 more minutes. None when the stage
+    doesn't report progress or it's too early to tell.
+    """
+    progress, started = session.get("progress"), session.get("stage_started_at")
+    if progress is None or started is None or progress < MIN_PROGRESS_FOR_ESTIMATE or progress >= 100:
+        return None
+    elapsed = time.time() - started
+    return round(elapsed * (100 - progress) / progress)
+
+
 def _public_view(session: dict) -> dict:
     """What GET /api/sessions/{id} returns (the stored file minus internal fields)."""
     return {
@@ -166,6 +185,10 @@ def _public_view(session: dict) -> dict:
         "participants": session["participants"],
         "status": session["status"],
         "stage": session["stage"],
+        # How far the current stage is, 0-100, or null for stages that don't
+        # report it (converting, summarizing) and when finished.
+        "progress": session.get("progress"),
+        "seconds_left": _estimate_seconds_left(session),
         "failed_stage": session.get("failed_stage"),
         "error": session.get("error"),
         "warnings": session.get("warnings", []),
@@ -176,14 +199,15 @@ def _public_view(session: dict) -> dict:
 def _run_job(session_id: str, audio_path: Path) -> None:
     """The background job: transcribe one upload and save the result.
 
-    Runs on the worker thread. Each stage change is saved to the session file,
-    which is what the app sees when it polls.
+    Runs on the worker thread. Each stage change, and the progress within long
+    stages, is saved to the session file, which is what the app sees when it polls.
     """
     session = sessions.load(session_id)
     job_started = time.monotonic()
     stage_started = job_started
     timings: dict[str, float] = {}
     current = {"stage": "uploaded"}
+    last_progress_save = 0.0
 
     def on_stage(stage: str) -> None:
         nonlocal stage_started
@@ -192,7 +216,17 @@ def _run_job(session_id: str, audio_path: Path) -> None:
         log.info("Session %s: %s done in %.1fs; now %s", session_id, current["stage"], now - stage_started, stage)
         current["stage"] = stage
         stage_started = now
-        sessions.update(session_id, status=stage, stage=stage, timings=timings)
+        # A new stage starts with no progress yet; time.time() (wall clock) is
+        # stored so the estimate survives being read by another thread.
+        sessions.update(session_id, status=stage, stage=stage, timings=timings, progress=None, stage_started_at=time.time())
+
+    def on_progress(percent: float) -> None:
+        nonlocal last_progress_save
+        now = time.monotonic()
+        if now - last_progress_save < PROGRESS_SAVE_SECONDS and percent < 100:
+            return
+        last_progress_save = now
+        sessions.update(session_id, progress=round(min(max(percent, 0.0), 100.0), 1))
 
     def on_warning(message: str) -> None:
         latest = sessions.load(session_id)
@@ -202,6 +236,7 @@ def _run_job(session_id: str, audio_path: Path) -> None:
         segments = engine.transcribe(
             audio_path,
             on_stage=on_stage,
+            on_progress=on_progress,
             on_warning=on_warning,
             # More speakers than participants is impossible, so cap detection there.
             max_speakers=len(session["participants"]),
@@ -219,7 +254,7 @@ def _run_job(session_id: str, audio_path: Path) -> None:
 
         timings[current["stage"]] = round(time.monotonic() - stage_started, 1)
         timings["total"] = round(time.monotonic() - job_started, 1)
-        sessions.update(session_id, status="ready", stage="ready", timings=timings, segment_count=len(segments))
+        sessions.update(session_id, status="ready", stage="ready", timings=timings, segment_count=len(segments), progress=None)
         log.info("Session %s: ready in %.1fs (%d segments)", session_id, timings["total"], len(segments))
     except engine.TranscriptionError as exc:
         sessions.update(session_id, status="failed", stage="failed", failed_stage=current["stage"], error=str(exc), timings=timings)

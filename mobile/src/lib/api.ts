@@ -51,6 +51,10 @@ export type SessionStatus = {
   name: string;
   status: Stage;
   stage: Stage;
+  /** How far the current stage is, 0-100; null for stages that don't report it. */
+  progress?: number | null;
+  /** Rough seconds left in the current stage, once there's enough progress to estimate. */
+  seconds_left?: number | null;
   /** Stage that failed, when status is "failed". */
   failed_stage?: Stage;
   // Why it failed (shown to the user).

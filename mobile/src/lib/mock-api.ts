@@ -85,7 +85,10 @@ function currentStatus(session: MockSession): SessionStatus {
   let elapsed = (Date.now() - session.uploadedAt) / 1000;
   for (const [stage, seconds] of STAGE_SECONDS) {
     if (elapsed < seconds) {
-      return { ...base, status: stage, stage };
+      // Like the real backend, only the long stages report a percentage.
+      const reportsProgress = stage === "transcribing" || stage === "aligning" || stage === "identifying_speakers";
+      const progress = reportsProgress ? Math.round((elapsed / seconds) * 1000) / 10 : null;
+      return { ...base, status: stage, stage, progress, seconds_left: reportsProgress ? Math.ceil(seconds - elapsed) : null };
     }
     elapsed -= seconds;
     if (session.shouldFail && stage === "converting") {

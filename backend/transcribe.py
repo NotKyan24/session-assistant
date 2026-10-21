@@ -3,7 +3,7 @@ TRANSCRIPTION ENGINE: the only file that knows about WhisperX.
 
 The rest of the backend calls one function:
 
-    transcribe(path, on_stage=..., on_warning=..., max_speakers=...) -> segments
+    transcribe(path, on_stage=..., on_progress=..., on_warning=..., max_speakers=...) -> segments
 
 and gets back a list of {"speaker", "start", "end", "text"} dicts. To try a
 different speech-to-text engine later, rewrite this file and keep that shape.
@@ -14,7 +14,11 @@ What happens inside, in order (each step reports a stage to `on_stage`):
 2. transcribing          Whisper "small" writes down the words, in English.
 3. aligning              wav2vec2 finds the exact time of each word.
 4. identifying_speakers  pyannote works out who spoke when, and each segment
-                         gets the speaker who talked most during it.
+                         gets the speaker who talked most during it. This
+                         step runs on the Mac's GPU when available (about 3x
+                         faster); the others stay on the CPU.
+Steps 2-4 also report how far along they are (0-100) to `on_progress`, so
+the app can show e.g. "Identifying speakers: 45%" on long recordings.
 If step 4 fails, the transcript still comes back, with every speaker set to
 "Unknown", and the problem is reported through `on_warning`.
 
@@ -82,15 +86,43 @@ def load_models() -> None:
         # The speaker model is optional: if it can't load (e.g. no HF token and
         # not cached yet), transcription still works, just without speakers.
         try:
-            from whisperx.diarize import DiarizationPipeline
-
-            _models["diarize"] = DiarizationPipeline(token=config.HF_TOKEN, device=config.WHISPER_DEVICE)
+            _models["diarize_device"] = _diarize_device()
+            _models["diarize"] = _load_diarizer(_models["diarize_device"])
         except Exception as exc:  # noqa: BLE001
             _models["diarize"] = None
             _models["diarize_error"] = f"{type(exc).__name__}: {exc}"
             log.warning("Speaker model unavailable (%s); transcripts will have Unknown speakers", type(exc).__name__)
 
         log.info("Models loaded in %.1fs", time.monotonic() - started)
+
+
+def _diarize_device() -> str:
+    if config.DIARIZE_DEVICE != "auto":
+        return config.DIARIZE_DEVICE
+    import torch
+
+    return "mps" if torch.backends.mps.is_available() else config.WHISPER_DEVICE
+
+
+def _load_diarizer(device: str):
+    from whisperx.diarize import DiarizationPipeline
+
+    log.info("Speaker model on %s", device)
+    return DiarizationPipeline(token=config.HF_TOKEN, device=device)
+
+
+def _diarize(audio, max_speakers, on_progress):
+    """Identify speakers; if the GPU fails, switch to the CPU for good and retry once."""
+    try:
+        return _models["diarize"](audio, max_speakers=max_speakers, progress_callback=on_progress)
+    except Exception as exc:  # noqa: BLE001
+        if _models.get("diarize_device") in (None, config.WHISPER_DEVICE):
+            raise
+        log.warning("Speaker step failed on %s (%s); retrying on %s", _models["diarize_device"], type(exc).__name__, config.WHISPER_DEVICE)
+        _models["diarize_device"] = config.WHISPER_DEVICE
+        _models["diarize"] = _load_diarizer(config.WHISPER_DEVICE)
+        on_progress(0.0)
+        return _models["diarize"](audio, max_speakers=max_speakers, progress_callback=on_progress)
 
 
 def models_loaded() -> bool:
@@ -116,6 +148,7 @@ def _convert_to_wav(source: Path, target: Path) -> None:
 def transcribe(
     path: str | Path,
     on_stage: Callable[[str], None] = lambda stage: None,
+    on_progress: Callable[[float], None] = lambda percent: None,
     on_warning: Callable[[str], None] = lambda message: None,
     max_speakers: int | None = None,
 ) -> list[Segment]:
@@ -124,6 +157,8 @@ def transcribe(
     path:         the uploaded audio file, any format ffmpeg can read.
     on_stage:     called with "converting", "transcribing", "aligning",
                   "identifying_speakers" as each step starts.
+    on_progress:  called with 0-100 as the current step advances (steps 2-4).
+                  It can be called often; the caller decides how often to save.
     on_warning:   called with a user-facing message for non-fatal problems.
     max_speakers: upper limit for speaker detection (e.g. the number of
                   participants); None lets the model decide.
@@ -145,6 +180,7 @@ def transcribe(
             language=config.WHISPER_LANGUAGE,
             print_progress=False,
             verbose=False,  # True would print the transcript text.
+            progress_callback=on_progress,
         )
         if not result["segments"]:
             return []  # No speech found.
@@ -158,6 +194,7 @@ def transcribe(
             config.WHISPER_DEVICE,
             return_char_alignments=False,
             print_progress=False,
+            progress_callback=on_progress,
         )
 
         on_stage("identifying_speakers")
@@ -166,7 +203,7 @@ def transcribe(
             on_warning("Speakers could not be identified: the speaker model isn't available on the server.")
         else:
             try:
-                speaker_turns = diarizer(audio, max_speakers=max_speakers)
+                speaker_turns = _diarize(audio, max_speakers, on_progress)
                 result = whisperx.assign_word_speakers(speaker_turns, result)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Speaker identification failed (%s); returning transcript without speakers", type(exc).__name__)
