@@ -8,8 +8,8 @@ What comes after the Day 1 end-to-end path, in the order we plan to work on it. 
 
 | # | Topic | Status |
 | --- | --- | --- |
-| 1 | Speaker naming | Next |
-| 2 | Shared participant roster | Next, built together with 1 |
+| 1 | Speaker naming | ✅ Done (Oct 21) |
+| 2 | Shared participant roster | ✅ Done (Oct 21) |
 | 3 | Participation metrics and risk notes in summaries | Planned; risk notes need Joe's input |
 | 4 | Session history | Planned; needs Joe's data rules |
 | 5 | Hawaiian words and names | Planned; needs a starter glossary |

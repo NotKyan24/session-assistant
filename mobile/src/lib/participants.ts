@@ -10,7 +10,8 @@ export type Participant = {
   label: string;
 };
 
-// Hard-coded test roster for Day 1. A real roster (with sign-in) comes later.
+// The Day 1 test participants. The real list now lives on the backend (the
+// shared roster, GET /api/roster); this only seeds demo mode.
 export const TEST_PARTICIPANTS: Participant[] = [
   { id: "facilitator", label: "Facilitator" },
   { id: "youth-001", label: "youth-001" },

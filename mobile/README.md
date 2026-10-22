@@ -12,10 +12,10 @@ Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready�
 
 | Step | Screen file | What happens | API call |
 | --- | --- | --- | --- |
-| 1 | `src/app/index.tsx` | Name the session, pick in person/video, tick consent for everyone. Start stays disabled until all are ticked. | `createSession` |
+| 1 | `src/app/index.tsx` | Name the session, pick in person/video, choose who's here from the shared roster (add or remove people there), tick consent for each. Start stays disabled until everyone chosen has consented. | `getRoster`, `addPerson`, `removePerson`, `createSession` |
 | 2 | `src/app/record.tsx` | Record with pause/resume, or choose an existing file. The screen stays awake while recording. | `uploadAudio` |
 | 3 | `src/app/processing.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
-| 4 | `src/app/transcript.tsx` | AI session notes at the top (if available), then `[mm:ss] Speaker 1: text`, one color per speaker. | `getSummary`, `getTranscript` |
+| 4 | `src/app/transcript.tsx` | "Who's speaking?" to match each voice to a participant, AI session notes (if available), then `[mm:ss] Name: text`, one color per speaker. Names replace "Speaker N" in both. | `getSession`, `setSpeakers`, `getSummary`, `getTranscript` |
 
 ## How the code is organized
 
@@ -31,6 +31,9 @@ src/
     level-meter.tsx   the microphone loudness bar
     stage-list.tsx    the processing checklist
     summary-card.tsx  the AI-written session notes
+    roster-row.tsx    a roster person: in today's session? / remove
+    add-person-form.tsx  add someone to the roster
+    speaker-namer.tsx "Who's speaking?": match voices to participants
   lib/              logic with no UI
     api.ts            the only code that talks to the backend
     mock-api.ts       the simulated backend for demo mode

@@ -4,13 +4,48 @@
     {
       "name": "mobile-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "mobile", "run", "web", "--", "--port", "8081"],
+      "runtimeArgs": [
+        "--prefix",
+        "mobile",
+        "run",
+        "web",
+        "--",
+        "--port",
+        "8081"
+      ],
       "port": 8081
     },
     {
       "name": "mobile-web-local-backend",
       "runtimeExecutable": "env",
-      "runtimeArgs": ["EXPO_PUBLIC_API_URL=http://localhost:8000", "npm", "--prefix", "mobile", "run", "web", "--", "--port", "8082"],
+      "runtimeArgs": [
+        "EXPO_PUBLIC_API_URL=http://localhost:8000",
+        "npm",
+        "--prefix",
+        "mobile",
+        "run",
+        "web",
+        "--",
+        "--port",
+        "8082"
+      ],
+      "port": 8082
+    },
+    {
+      "name": "mobile-web-test-backend",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "EXPO_PUBLIC_API_URL=http://localhost:8001",
+        "npm",
+        "--prefix",
+        "mobile",
+        "run",
+        "web",
+        "--",
+        "--port",
+        "8082",
+        "--localhost"
+      ],
       "port": 8082
     }
   ]

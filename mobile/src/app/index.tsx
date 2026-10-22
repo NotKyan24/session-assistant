@@ -5,24 +5,27 @@
  * facilitator:
  * 1. Names the session (pre-filled from today's date, editable).
  * 2. Picks in person or video.
- * 3. Checks a consent box for every participant.
+ * 3. Picks who's here today from the shared roster (loaded from the backend).
+ *    People can be added to or removed from the roster here too.
+ * 4. Checks a consent box for every person in today's session.
  *
- * Consent rule: **Start** stays disabled until every participant is checked,
- * and a note names who's still missing. The backend enforces the same rule,
- * rejecting a session with any participant who hasn't consented.
+ * Consent rule: **Start** stays disabled until at least one person is in the
+ * session and every one of them has consented, and a note names who's still
+ * missing. The backend enforces the same rule.
  *
  * Pressing Start creates the session through the API, gets back a session id,
  * and opens the Record screen with that id.
  */
 import { router } from "expo-router";
-import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { AddPersonForm } from "@/components/add-person-form";
 import { Button } from "@/components/button";
 import { ConsentRow } from "@/components/consent-row";
-import { api, isMock, type SessionMode } from "@/lib/api";
+import { RosterRow } from "@/components/roster-row";
+import { api, isMock, type Person, type SessionMode } from "@/lib/api";
 import { defaultSessionName } from "@/lib/format";
-import { TEST_PARTICIPANTS } from "@/lib/participants";
 import { useColors } from "@/lib/theme";
 
 // The two options for the "Where" toggle. `key` is what's sent to the backend.
@@ -36,14 +39,49 @@ export default function SetupScreen() {
   // Screen state. React re-draws the screen whenever one of these changes.
   const [name, setName] = useState(defaultSessionName);
   const [mode, setMode] = useState<SessionMode>("in_person");
-  // Consent per participant id, e.g. { "youth-001": true }. Nobody starts checked.
+  // The shared roster; null while it loads.
+  const [roster, setRoster] = useState<Person[] | null>(null);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // Who's in today's session, and their consent, by participant id. Nobody starts checked.
+  const [included, setIncluded] = useState<Record<string, boolean>>({});
   const [consent, setConsent] = useState<Record<string, boolean>>({});
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Derived on every render: who hasn't consented, and whether Start is allowed.
-  const missing = TEST_PARTICIPANTS.filter((p) => !consent[p.id]);
-  const canStart = missing.length === 0 && name.trim().length > 0 && !starting;
+  // Load the roster once when the screen opens.
+  useEffect(() => {
+    api.getRoster().then(setRoster, (e) => setRosterError(e instanceof Error ? e.message : "Could not load the roster."));
+  }, []);
+
+  // Derived on every render: today's people, who hasn't consented, and whether Start is allowed.
+  const inSession = (roster ?? []).filter((p) => included[p.id]);
+  const missing = inSession.filter((p) => !consent[p.id]);
+  const canStart = inSession.length > 0 && missing.length === 0 && name.trim().length > 0 && !starting;
+
+  function toggleIncluded(id: string) {
+    setIncluded((c) => ({ ...c, [id]: !c[id] }));
+    // Taking someone out of today's session also clears their consent tick.
+    setConsent((c) => ({ ...c, [id]: false }));
+  }
+
+  async function addPerson(person: Person) {
+    const added = await api.addPerson(person);
+    setRoster((r) => [...(r ?? []), added]);
+    setIncluded((c) => ({ ...c, [added.id]: true }));
+    setAdding(false);
+  }
+
+  async function removePerson(id: string) {
+    try {
+      await api.removePerson(id);
+      setRoster((r) => (r ?? []).filter((p) => p.id !== id));
+      setIncluded((c) => ({ ...c, [id]: false }));
+      setConsent((c) => ({ ...c, [id]: false }));
+    } catch (e) {
+      setRosterError(e instanceof Error ? e.message : "Could not remove this person.");
+    }
+  }
 
   // Start button: create the session, then go to the Record screen with its id.
   // We send every participant with their consent flag; the backend checks it again.
@@ -54,7 +92,7 @@ export default function SetupScreen() {
       const { id } = await api.createSession({
         name: name.trim(),
         mode,
-        participants: TEST_PARTICIPANTS.map((p) => ({ ...p, consented: !!consent[p.id] })),
+        participants: inSession.map((p) => ({ ...p, consented: !!consent[p.id] })),
       });
       router.push({ pathname: "/record", params: { id } });
     } catch (e) {
@@ -95,23 +133,54 @@ export default function SetupScreen() {
         ))}
       </View>
 
-      <Text style={[styles.heading, { color: colors.muted }]}>Participants and consent</Text>
-      <View>
-        {TEST_PARTICIPANTS.map((p) => (
-          <ConsentRow
-            key={p.id}
-            label={p.label}
-            checked={!!consent[p.id]}
-            onToggle={() => setConsent((c) => ({ ...c, [p.id]: !c[p.id] }))}
-          />
+      <Text style={[styles.heading, { color: colors.muted }]}>{"Who's here today"}</Text>
+      {roster === null && !rosterError && <ActivityIndicator />}
+      {rosterError && <Text style={[styles.note, { color: colors.danger }]}>{rosterError}</Text>}
+      {roster && (
+        <View>
+          {roster.length === 0 && (
+            <Text style={[styles.note, { color: colors.muted }]}>The roster is empty. Add the people in this session.</Text>
+          )}
+          {roster.map((p) => (
+            <RosterRow
+              key={p.id}
+              person={p}
+              included={!!included[p.id]}
+              onToggle={() => toggleIncluded(p.id)}
+              onRemove={() => removePerson(p.id)}
+            />
+          ))}
+        </View>
+      )}
+      {roster &&
+        (adding ? (
+          <AddPersonForm onAdd={addPerson} onCancel={() => setAdding(false)} />
+        ) : (
+          <Button title="+ Add participant" variant="secondary" onPress={() => setAdding(true)} />
         ))}
-      </View>
 
-      <Text style={[styles.note, { color: missing.length ? colors.muted : colors.success }]}>
-        {missing.length
-          ? `Waiting on consent from: ${missing.map((p) => p.label).join(", ")}`
-          : "Everyone has consented."}
-      </Text>
+      <Text style={[styles.heading, { color: colors.muted }]}>Consent</Text>
+      {inSession.length === 0 ? (
+        <Text style={[styles.note, { color: colors.muted }]}>{"Choose who's here today, above."}</Text>
+      ) : (
+        <>
+          <View>
+            {inSession.map((p) => (
+              <ConsentRow
+                key={p.id}
+                label={p.label}
+                checked={!!consent[p.id]}
+                onToggle={() => setConsent((c) => ({ ...c, [p.id]: !c[p.id] }))}
+              />
+            ))}
+          </View>
+          <Text style={[styles.note, { color: missing.length ? colors.muted : colors.success }]}>
+            {missing.length
+              ? `Waiting on consent from: ${missing.map((p) => p.label).join(", ")}`
+              : "Everyone has consented."}
+          </Text>
+        </>
+      )}
 
       {error && <Text style={[styles.note, { color: colors.danger }]}>{error}</Text>}
 

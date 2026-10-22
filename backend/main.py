@@ -16,6 +16,10 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     GET  /api/sessions/{id}               status + current stage (the app polls this)
     GET  /api/sessions/{id}/transcript    the segments, once status is "ready"
     GET  /api/sessions/{id}/summary       the structured session notes, once "ready"
+    PUT  /api/sessions/{id}/speakers      say which participant each speaker is
+    GET  /api/roster                      everyone on the shared roster
+    POST /api/roster                      add someone to the roster
+    DELETE /api/roster/{person_id}        remove someone (past sessions keep them)
     GET  /api/health                      quick "is the server up?" check
 
 Transcription runs in a single background worker thread: one job at a time,
@@ -47,6 +51,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+import roster
 import sessions
 import summarize as summarizer
 import transcribe as engine
@@ -107,7 +112,7 @@ app = FastAPI(title="Session Assistant", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
@@ -119,6 +124,11 @@ class ParticipantIn(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$", examples=["youth-001"])
     label: str = Field(min_length=1, max_length=100, examples=["youth-001"])
     consented: bool
+
+
+class PersonIn(BaseModel):
+    id: str = Field(min_length=1, max_length=64, examples=["youth-004"])
+    label: str = Field(default="", max_length=100, examples=["youth-004"])
 
 
 class SessionIn(BaseModel):
@@ -193,6 +203,8 @@ def _public_view(session: dict) -> dict:
         "error": session.get("error"),
         "warnings": session.get("warnings", []),
         "timings": session.get("timings", {}),
+        # Which participant (by id) each speaker label belongs to, once staff say so.
+        "speaker_map": session.get("speaker_map", {}),
     }
 
 
@@ -389,3 +401,56 @@ def get_summary(session_id: str) -> dict:
     if notes is None:
         raise HTTPException(status_code=404, detail="There's no summary for this session.")
     return {"summary": notes}
+
+
+@app.put("/api/sessions/{session_id}/speakers", dependencies=protected)
+def set_speakers(session_id: str, body: dict[str, str | None]) -> dict:
+    """Say which participant each speaker label is, e.g. {"SPEAKER_00": "facilitator"}.
+
+    Only speakers found in this session's transcript and participants of this
+    session are accepted. null clears a speaker back to "Speaker N". Stored by
+    participant id only.
+    """
+    session = _get_session_or_404(session_id)
+    if session["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Speakers can be named once the transcript is ready.")
+    speakers = {s["speaker"] for s in sessions.load_transcript(session_id) or []}
+    participant_ids = {p["id"] for p in session["participants"]}
+    speaker_map = dict(session.get("speaker_map", {}))
+    for speaker, person_id in body.items():
+        if speaker not in speakers:
+            raise HTTPException(status_code=400, detail=f"{speaker} isn't a speaker in this transcript.")
+        if person_id is None:
+            speaker_map.pop(speaker, None)
+        elif person_id not in participant_ids:
+            raise HTTPException(status_code=400, detail=f"{person_id} isn't a participant in this session.")
+        else:
+            speaker_map[speaker] = person_id
+    sessions.update(session_id, speaker_map=speaker_map)
+    log.info("Session %s: speaker names updated (%d of %d named)", session_id, len(speaker_map), len(speakers))
+    return {"speaker_map": speaker_map}
+
+
+@app.get("/api/roster", dependencies=protected)
+def get_roster() -> dict:
+    return {"people": roster.list_people()}
+
+
+@app.post("/api/roster", status_code=201, dependencies=protected)
+def add_to_roster(body: PersonIn) -> dict:
+    try:
+        person = roster.add_person(body.id, body.label)
+    except roster.RosterError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    log.info("Roster: added %s", person["id"])
+    return person
+
+
+@app.delete("/api/roster/{person_id}", dependencies=protected)
+def remove_from_roster(person_id: str) -> dict:
+    try:
+        roster.remove_person(person_id)
+    except roster.RosterError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    log.info("Roster: removed %s", person_id)
+    return {"removed": person_id}

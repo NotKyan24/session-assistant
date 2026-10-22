@@ -1,13 +1,15 @@
 /**
  * API LAYER: the one place the app talks to the backend.
  *
- * Screens never call `fetch` directly. They call the four functions on `api`,
- * which match the backend's four endpoints:
+ * Screens never call `fetch` directly. They call the functions on `api`,
+ * which match the backend's endpoints:
  *   createSession  → POST /api/sessions               (Setup screen)
  *   uploadAudio    → POST /api/sessions/{id}/audio    (Record screen)
  *   getSession     → GET  /api/sessions/{id}          (Status screen, polled)
  *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
  *   getSummary     → GET  /api/sessions/{id}/summary    (Transcript screen)
+ *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Transcript screen)
+ *   getRoster / addPerson / removePerson → /api/roster  (Setup screen)
  *
  * Two implementations share the same shape (the `Api` type):
  * - `httpApi` makes real network calls to EXPO_PUBLIC_API_URL (the Mac's
@@ -38,6 +40,12 @@ export type Stage =
   | "failed";
 
 // What the Setup screen sends to create a session.
+// Someone on the shared roster. `id` is what's stored; `label` is display-only.
+export type Person = {
+  id: string;
+  label: string;
+};
+
 export type NewSession = {
   name: string;
   mode: SessionMode;
@@ -60,6 +68,10 @@ export type SessionStatus = {
   error?: string | null;
   // Non-fatal problems, e.g. speakers couldn't be identified.
   warnings?: string[];
+  /** Who took part, with consent (a copy kept with the session). */
+  participants?: { id: string; label: string; consented: boolean }[];
+  /** Which participant id each speaker label is, e.g. { SPEAKER_00: "facilitator" }. */
+  speaker_map?: Record<string, string>;
 };
 
 // One line of the transcript: who spoke, when (in seconds), and what they said.
@@ -95,6 +107,11 @@ export type Api = {
   getTranscript(id: string): Promise<Segment[]>;
   /** null when the session has no summary (e.g. the summary model was unavailable). */
   getSummary(id: string): Promise<Summary | null>;
+  /** Set or clear (null) which participant each speaker label is. Returns the full map. */
+  setSpeakers(id: string, changes: Record<string, string | null>): Promise<Record<string, string>>;
+  getRoster(): Promise<Person[]>;
+  addPerson(person: Person): Promise<Person>;
+  removePerson(personId: string): Promise<void>;
 };
 
 // Read from mobile/.env when the app starts (restart Expo after changing it).
@@ -165,6 +182,28 @@ const httpApi: Api = {
       if (e instanceof Error && e.message.startsWith("There's no summary")) return null;
       throw e;
     }
+  },
+
+  setSpeakers: async (id, changes) => {
+    const body = await request<{ speaker_map: Record<string, string> }>(`/api/sessions/${id}/speakers`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    return body.speaker_map;
+  },
+
+  getRoster: async () => (await request<{ people: Person[] }>("/api/roster")).people,
+
+  addPerson: (person) =>
+    request<Person>("/api/roster", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(person),
+    }),
+
+  removePerson: async (personId) => {
+    await request(`/api/roster/${encodeURIComponent(personId)}`, { method: "DELETE" });
   },
 };
 

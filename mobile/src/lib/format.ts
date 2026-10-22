@@ -36,3 +36,16 @@ export function formatTimeLeft(seconds: number): string {
   const rest = minutes % 60;
   return rest ? `about ${hours} h ${rest} min left` : `about ${hours} h left`;
 }
+
+/**
+ * A function that swaps "Speaker 1", "Speaker 2", ... in text for the names
+ * staff assigned. Used on the notes, which the summary model writes with
+ * "Speaker N" (SPEAKER_00 is "Speaker 1"). Unnamed speakers stay as they are.
+ */
+export function speakerRenamer(names: Record<string, string>): (text: string) => string {
+  return (text) =>
+    text.replace(/\bSpeaker (\d+)\b/g, (match, n: string) => {
+      const label = `SPEAKER_${String(Number(n) - 1).padStart(2, "0")}`;
+      return names[label] ?? match;
+    });
+}

@@ -15,6 +15,8 @@ Checks:
 2. A non-audio upload is rejected (415).
 3. The real flow: create → upload → poll every 3 s until ready → fetch the
    transcript and the summary (if the summary model was reachable).
+4. Speaker naming: name a speaker, reject an outsider, clear it again.
+5. Roster: add a test person, reject a duplicate, remove them.
 
 Prints statuses, timings, speaker and section counts. It never prints
 transcript or summary text.
@@ -52,6 +54,10 @@ def read_access_key() -> str:
             if line.startswith("API_ACCESS_KEY="):
                 return line.split("=", 1)[1].strip()
     return ""
+
+
+def send_json(method: str, url: str, data) -> tuple[int, dict]:
+    return call(method, url, json.dumps(data).encode(), {"Content-Type": "application/json"})
 
 
 def call(
@@ -155,6 +161,28 @@ def main() -> None:
         print(f"       items per section: {counts}")
     else:
         print(f"[INFO] no summary ({body.get('detail', status)}); see the warning above")
+
+    first = speakers[0]
+    status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {first: "facilitator"})
+    check("speaker named", status == 200 and body["speaker_map"].get(first) == "facilitator", f"{first} -> facilitator")
+    status, _ = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {first: "not-in-session"})
+    check("naming a non-participant is rejected", status == 400)
+    status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {first: None})
+    check("speaker name cleared", status == 200 and first not in body["speaker_map"])
+
+    test_id = "smoke-test-person"
+    call("DELETE", f"{base}/api/roster/{test_id}")  # Leftover from an interrupted run, if any.
+    status, _ = send_json("POST", f"{base}/api/roster", {"id": test_id, "label": "Smoke Test"})
+    check("roster: person added", status == 201)
+    status, _ = send_json("POST", f"{base}/api/roster", {"id": test_id, "label": "Smoke Test"})
+    check("roster: duplicate rejected", status == 409)
+    status, _ = send_json("POST", f"{base}/api/roster", {"id": "bad id!", "label": "x"})
+    check("roster: invalid id rejected", status == 400)
+    status, body = call("GET", f"{base}/api/roster")
+    check("roster: listed", status == 200 and any(p["id"] == test_id for p in body["people"]), f"{len(body['people'])} people")
+    status, _ = call("DELETE", f"{base}/api/roster/{test_id}")
+    _, body = call("GET", f"{base}/api/roster")
+    check("roster: person removed", status == 200 and not any(p["id"] == test_id for p in body["people"]))
 
 
 if __name__ == "__main__":

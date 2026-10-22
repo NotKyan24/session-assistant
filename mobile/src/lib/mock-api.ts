@@ -17,7 +17,8 @@
  * - Simulates a failure at the Converting stage if the uploaded file's name
  *   contains "fail", to test the failure screen.
  */
-import type { Api, Segment, SessionStatus, Stage, Summary } from "./api";
+import type { Api, Person, Segment, SessionStatus, Stage, Summary } from "./api";
+import { TEST_PARTICIPANTS } from "./participants";
 
 // How long each simulated stage lasts, in seconds, in order.
 const STAGE_SECONDS: [Stage, number][] = [
@@ -33,6 +34,8 @@ const STAGE_SECONDS: [Stage, number][] = [
 type MockSession = {
   id: string;
   name: string;
+  participants: { id: string; label: string; consented: boolean }[];
+  speakerMap: Record<string, string>;
   // When the upload happened (milliseconds), or null before any upload.
   uploadedAt: number | null;
   /** File names containing "fail" simulate a failed job. */
@@ -41,6 +44,9 @@ type MockSession = {
 
 // All mock sessions, by id. In memory only.
 const sessions = new Map<string, MockSession>();
+
+// The demo roster, in memory; starts with the Day 1 test participants.
+let roster: Person[] = [...TEST_PARTICIPANTS];
 
 // Shaped exactly like the real WhisperX output (speaker / start / end / text).
 const SAMPLE_TRANSCRIPT: Segment[] = [
@@ -78,7 +84,7 @@ function newId(): string {
 // Walks through the stages, subtracting each stage's duration from the time
 // since upload. The stage where the time runs out is the current one.
 function currentStatus(session: MockSession): SessionStatus {
-  const base = { id: session.id, name: session.name };
+  const base = { id: session.id, name: session.name, participants: session.participants, speaker_map: session.speakerMap };
   if (session.uploadedAt === null) {
     return { ...base, status: "created", stage: "created" };
   }
@@ -112,7 +118,14 @@ export const mockApi: Api = {
       throw new Error(`Missing consent: ${missing.map((p) => p.id).join(", ")}`);
     }
     const id = newId();
-    sessions.set(id, { id, name: session.name, uploadedAt: null, shouldFail: false });
+    sessions.set(id, {
+      id,
+      name: session.name,
+      participants: session.participants,
+      speakerMap: {},
+      uploadedAt: null,
+      shouldFail: false,
+    });
     return { id };
   },
 
@@ -146,5 +159,34 @@ export const mockApi: Api = {
     if (!session) throw new Error("Session not found");
     if (currentStatus(session).status !== "ready") throw new Error("Summary not ready");
     return SAMPLE_SUMMARY;
+  },
+
+  async setSpeakers(id, changes) {
+    const session = sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    for (const [speaker, personId] of Object.entries(changes)) {
+      if (personId === null) delete session.speakerMap[speaker];
+      else session.speakerMap[speaker] = personId;
+    }
+    return { ...session.speakerMap };
+  },
+
+  async getRoster() {
+    await delay(150);
+    return [...roster];
+  },
+
+  async addPerson(person) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(person.id)) {
+      throw new Error("IDs can only use letters, numbers, - and _ (up to 64 characters), e.g. youth-004.");
+    }
+    if (roster.some((p) => p.id === person.id)) throw new Error(`${person.id} is already on the roster.`);
+    const added = { id: person.id, label: person.label.trim() || person.id };
+    roster = [...roster, added];
+    return added;
+  },
+
+  async removePerson(personId) {
+    roster = roster.filter((p) => p.id !== personId);
   },
 };

@@ -16,16 +16,18 @@ import { useColors } from "@/lib/theme";
 
 type Props = {
   summary: Summary;
+  /** Optional text swap, e.g. "Speaker 1" -> the name staff assigned. */
+  rename?: (text: string) => string;
 };
 
-export function SummaryCard({ summary }: Props) {
+export function SummaryCard({ summary, rename = (text) => text }: Props) {
   const colors = useColors();
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={[styles.heading, { color: colors.text }]}>Session notes</Text>
       <Text style={[styles.note, { color: colors.muted }]}>Written by AI from the transcript. Check before relying on it.</Text>
 
-      {summary.overview ? <Text style={[styles.body, { color: colors.text }]}>{summary.overview}</Text> : null}
+      {summary.overview ? <Text style={[styles.body, { color: colors.text }]}>{rename(summary.overview)}</Text> : null}
 
       {summary.sections.map((section) => (
         <View key={section.title} style={styles.section}>
@@ -36,7 +38,7 @@ export function SummaryCard({ summary }: Props) {
             section.items.map((item, i) => (
               <View key={i} style={styles.bulletRow}>
                 <Text style={[styles.body, { color: colors.muted }]}>•</Text>
-                <Text style={[styles.body, styles.bulletText, { color: colors.text }]}>{item}</Text>
+                <Text style={[styles.body, styles.bulletText, { color: colors.text }]}>{rename(item)}</Text>
               </View>
             ))
           )}
