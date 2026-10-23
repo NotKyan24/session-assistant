@@ -17,6 +17,8 @@ Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready�
 | 3 | `src/app/processing.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
 | 4 | `src/app/session/[id]/` | **Results**, three tabs: **Notes** ("Who's speaking?" to match each voice to a participant, then the AI notes), **Participation** (speaking time and %, words, questions, who responds to whom, AI engagement notes) and **Transcript** (`[mm:ss] Name: text`). Names replace "Speaker N" on every tab. | `getSession`, `setSpeakers`, `getSummary`, `getMetrics`, `getTranscript` |
 
+**Past sessions:** the "Past sessions" button (top right of Setup) lists earlier sessions, newest first, with search by session or participant name. Tapping one opens its results (or its Status screen if it's still processing or failed). Test sessions and never-recorded ones are hidden unless you turn on "Show test and unrecorded sessions"; nothing is deleted. Uploading a recording that already has a finished or in-progress session is refused ("This recording was already processed"), with a button to open the existing results; a recording whose earlier session failed can be uploaded again.
+
 ## How the code is organized
 
 ```
@@ -25,6 +27,7 @@ src/
     _layout.tsx     the navigator that stacks the screens
     index.tsx       Setup        record.tsx   Record
     processing.tsx  Status
+    sessions.tsx    Past sessions (list + search)
     session/[id]/   Results: _layout.tsx (the tab bar), notes.tsx,
                     participation.tsx, transcript.tsx
   components/       reusable pieces of UI
@@ -38,6 +41,7 @@ src/
     speaker-namer.tsx "Who's speaking?": match voices to participants
     participation-card.tsx  participation numbers and who responds to whom
     tab-button.tsx    a tab in the results tab bar
+    session-row.tsx   one row in the Past sessions list
   lib/              logic with no UI
     api.ts            the only code that talks to the backend
     session-results.tsx  data shared by the three results tabs (+ speaker names)

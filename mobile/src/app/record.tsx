@@ -37,7 +37,7 @@ import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-nativ
 
 import { Button } from "@/components/button";
 import { LevelMeter } from "@/components/level-meter";
-import { api, type AudioFile } from "@/lib/api";
+import { api, DuplicateRecordingError, type AudioFile } from "@/lib/api";
 import { formatClock } from "@/lib/format";
 import { useColors } from "@/lib/theme";
 
@@ -77,6 +77,8 @@ export default function RecordScreen() {
   const [permission, setPermission] = useState<Permission>("checking");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // Set when the upload is refused because this recording already has a session.
+  const [duplicateOf, setDuplicateOf] = useState<DuplicateRecordingError | null>(null);
   // 0-1 while a file is being sent, for "Uploading… 45%".
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
@@ -153,12 +155,27 @@ export default function RecordScreen() {
   async function upload(file: AudioFile) {
     setPhase("uploading");
     setUploadProgress(0);
+    setDuplicateOf(null);
     try {
       await api.uploadAudio(id, file, setUploadProgress);
       router.replace({ pathname: "/processing", params: { id } });
     } catch (e) {
-      setError(e instanceof Error ? `Upload failed: ${e.message}` : "Upload failed.");
+      if (e instanceof DuplicateRecordingError) {
+        setDuplicateOf(e);
+      } else {
+        setError(e instanceof Error ? `Upload failed: ${e.message}` : "Upload failed.");
+      }
       setPhase("idle");
+    }
+  }
+
+  // Opens the session that already has this recording: its results if
+  // finished, otherwise its Status screen.
+  function openExisting(existing: DuplicateRecordingError) {
+    if (existing.existingStatus === "ready") {
+      router.replace({ pathname: "/session/[id]/notes", params: { id: existing.existingSessionId } });
+    } else {
+      router.replace({ pathname: "/processing", params: { id: existing.existingSessionId } });
     }
   }
 
@@ -225,6 +242,15 @@ export default function RecordScreen() {
 
       {error && <Text style={[styles.body, { color: colors.danger }]}>{error}</Text>}
 
+      {duplicateOf && (
+        <View style={styles.duplicate}>
+          <Text style={[styles.body, { color: colors.text }]}>
+            {duplicateOf.message} It won&apos;t be processed again.
+          </Text>
+          <Button title="Open the existing results" onPress={() => openExisting(duplicateOf)} />
+        </View>
+      )}
+
       {phase === "idle" && (
         <Button title="Choose a file instead" variant="secondary" onPress={chooseFile} style={styles.chooseFile} />
       )}
@@ -258,6 +284,9 @@ const styles = StyleSheet.create({
   controls: {
     marginTop: 16,
     gap: 12,
+  },
+  duplicate: {
+    gap: 10,
   },
   chooseFile: {
     marginTop: "auto",

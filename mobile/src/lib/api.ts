@@ -5,6 +5,7 @@
  * which match the backend's endpoints:
  *   createSession  → POST /api/sessions               (Setup screen)
  *   uploadAudio    → POST /api/sessions/{id}/audio    (Record screen)
+ *   listSessions   → GET  /api/sessions               (Past sessions screen)
  *   getSession     → GET  /api/sessions/{id}          (Status screen, polled)
  *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
  *   getSummary     → GET  /api/sessions/{id}/summary    (Transcript screen)
@@ -111,6 +112,24 @@ export type Metrics = {
   interactions: { from: string; to: string; count: number }[];
 };
 
+// One row in the Past sessions list.
+export type SessionListItem = {
+  id: string;
+  name: string;
+  mode: SessionMode;
+  created_at: string;
+  status: Stage;
+  failed_stage?: Stage | null;
+  participants: Person[];
+  /** Recording length, once processed. */
+  length_seconds?: number | null;
+  has_summary: boolean;
+  /** A test session or one never recorded (only listed when asked for). */
+  hidden: boolean;
+};
+
+export type SessionList = { sessions: SessionListItem[]; total: number; has_more: boolean };
+
 // A file on the phone, ready to upload: where it is, its name and its type.
 export type AudioFile = {
   uri: string;
@@ -124,6 +143,8 @@ export type Api = {
   /** onProgress gets 0-1 as the file is sent (on phones; the browser reports only the end). */
   uploadAudio(id: string, file: AudioFile, onProgress?: (fraction: number) => void): Promise<void>;
   getSession(id: string): Promise<SessionStatus>;
+  /** Past sessions, newest first. q searches session and participant names. */
+  listSessions(options: { q?: string; includeHidden?: boolean; offset?: number }): Promise<SessionList>;
   getTranscript(id: string): Promise<Segment[]>;
   /** null when the session has no summary (e.g. the summary model was unavailable). */
   getSummary(id: string): Promise<Summary | null>;
@@ -162,11 +183,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function errorDetail(status: number, bodyText: string): string {
   try {
     const body = JSON.parse(bodyText);
-    if (body?.detail) return typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    if (typeof body?.detail === "string") return body.detail;
+    if (typeof body?.detail?.message === "string") return body.detail.message;
+    if (body?.detail) return JSON.stringify(body.detail);
   } catch {
     // Not JSON; use the status code.
   }
   return `Server error (HTTP ${status})`;
+}
+
+/** The upload was refused because this exact recording already has a session. */
+export class DuplicateRecordingError extends Error {
+  constructor(
+    message: string,
+    readonly existingSessionId: string,
+    readonly existingStatus: Stage,
+  ) {
+    super(message);
+  }
 }
 
 // The real implementation: plain HTTP calls to the FastAPI backend.
@@ -184,10 +218,26 @@ const httpApi: Api = {
   async uploadAudio(id, file, onProgress) {
     const headers: Record<string, string> = API_KEY ? { "X-API-Key": API_KEY } : {};
     const { status, body } = await uploadFile(`${API_URL}/api/sessions/${id}/audio`, file, headers, onProgress);
+    if (status === 409) {
+      // The backend says which session already has this recording.
+      try {
+        const detail = JSON.parse(body)?.detail;
+        if (detail?.existing_session_id) {
+          throw new DuplicateRecordingError(detail.message, detail.existing_session_id, detail.existing_status);
+        }
+      } catch (e) {
+        if (e instanceof DuplicateRecordingError) throw e;
+      }
+    }
     if (status < 200 || status >= 300) throw new Error(errorDetail(status, body));
   },
 
   getSession: (id) => request(`/api/sessions/${id}`),
+
+  listSessions: ({ q = "", includeHidden = false, offset = 0 }) => {
+    const params = new URLSearchParams({ q, include_hidden: String(includeHidden), offset: String(offset) });
+    return request(`/api/sessions?${params}`);
+  },
 
   getTranscript: async (id) => {
     const body = await request<{ segments: Segment[] }>(`/api/sessions/${id}/transcript`);

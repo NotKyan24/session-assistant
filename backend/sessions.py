@@ -123,6 +123,10 @@ def save_summary(session_id: str, notes: dict) -> None:
     _write_json(_summary_path(session_id), notes)
 
 
+def has_summary(session_id: str) -> bool:
+    return is_valid_id(session_id) and _summary_path(session_id).exists()
+
+
 def load_summary(session_id: str) -> dict | None:
     if not is_valid_id(session_id):
         return None

@@ -4,12 +4,13 @@
  * Expo Router turns every file in src/app/ into a screen, named after the file:
  *   index.tsx → "/" (Setup) · record.tsx → "/record" · processing.tsx → "/processing" (Status)
  *   session/[id]/ → "/session/<id>/notes" | "/participation" | "/transcript" (Results, as tabs)
+ *   sessions.tsx → "/sessions" (Past sessions)
  * This file wraps them in a Stack: each new screen slides in on top of the
  * last, with a header bar and a back button.
  *
- * Status and Results hide the back button and swipe-back gesture. Once
- * audio is uploaded, going "back" to the recorder makes no sense; the way
- * out is the "New session" button.
+ * After a recording, Record is replaced by Status and Status by Results, so
+ * "back" from either returns to Setup (never to a finished recording). Opened
+ * from Past sessions, "back" returns to the list.
  */
 import { Stack } from "expo-router";
 
@@ -28,8 +29,9 @@ export default function RootLayout() {
     >
       <Stack.Screen name="index" options={{ title: "New session" }} />
       <Stack.Screen name="record" options={{ title: "Record" }} />
-      <Stack.Screen name="processing" options={{ title: "Processing", headerBackVisible: false, gestureEnabled: false }} />
-      <Stack.Screen name="session/[id]" options={{ title: "Session results", headerBackVisible: false, gestureEnabled: false }} />
+      <Stack.Screen name="processing" options={{ title: "Processing" }} />
+      <Stack.Screen name="session/[id]" options={{ title: "Session results" }} />
+      <Stack.Screen name="sessions" options={{ title: "Past sessions" }} />
     </Stack>
   );
 }

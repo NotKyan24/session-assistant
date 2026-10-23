@@ -13,6 +13,8 @@ enter the key).
 Endpoints (the phone's src/lib/api.ts calls exactly these):
     POST /api/sessions                    create a session; 400 unless everyone consented
     POST /api/sessions/{id}/audio         upload the recording; starts transcription
+                                          (409 if the same recording already has a session)
+    GET  /api/sessions                    list past sessions, newest first (?q= to search)
     GET  /api/sessions/{id}               status + current stage (the app polls this)
     GET  /api/sessions/{id}/transcript    the segments, once status is "ready"
     GET  /api/sessions/{id}/summary       the structured session notes, once "ready"
@@ -39,6 +41,7 @@ text, summaries, session names or participant labels.
 
 import config  # noqa: F401  (must come first: loads .env and sets env flags)
 
+import hashlib
 import logging
 import secrets
 import time
@@ -137,6 +140,8 @@ class SessionIn(BaseModel):
     name: str = Field(min_length=1, max_length=200, examples=["Tue group, Oct 13"])
     mode: Literal["in_person", "video"]
     participants: list[ParticipantIn] = Field(min_length=1, max_length=50)
+    # Set only by smoke_test.py, so test sessions stay out of the Past sessions list.
+    test: bool = False
 
 
 # ---------- Access key ----------
@@ -165,6 +170,32 @@ protected = [Depends(require_access)]
 
 
 # ---------- Helpers ----------
+
+
+def _audio_fingerprint(session: dict) -> str | None:
+    """A session's recording fingerprint; worked out (and saved) once for older sessions."""
+    if session.get("audio_sha256"):
+        return session["audio_sha256"]
+    audio = session.get("audio_file")
+    if not audio or not (config.AUDIO_DIR / audio).exists():
+        return None
+    digest = hashlib.sha256()
+    with (config.AUDIO_DIR / audio).open("rb") as f:
+        while chunk := f.read(1024 * 1024):
+            digest.update(chunk)
+    sessions.update(session["id"], audio_sha256=digest.hexdigest())
+    return digest.hexdigest()
+
+
+def _find_same_recording(audio_sha256: str, exclude_id: str) -> dict | None:
+    """Another real session (not a test, not failed) made from exactly the same audio file."""
+    for s in sessions.all_sessions():
+        is_test = s.get("test") or s["name"] in _OLD_TEST_NAMES
+        if s["id"] == exclude_id or is_test or s["status"] in ("created", "failed"):
+            continue
+        if _audio_fingerprint(s) == audio_sha256:
+            return s
+    return None
 
 
 def _get_session_or_404(session_id: str) -> dict:
@@ -268,7 +299,16 @@ def _run_job(session_id: str, audio_path: Path) -> None:
 
         timings[current["stage"]] = round(time.monotonic() - stage_started, 1)
         timings["total"] = round(time.monotonic() - job_started, 1)
-        sessions.update(session_id, status="ready", stage="ready", timings=timings, segment_count=len(segments), progress=None)
+        sessions.update(
+            session_id,
+            status="ready",
+            stage="ready",
+            timings=timings,
+            segment_count=len(segments),
+            progress=None,
+            # Kept for the Past sessions list (up to the end of the last speech).
+            length_seconds=metrics.participation(segments)["session"]["length_seconds"],
+        )
         log.info("Session %s: ready in %.1fs (%d segments)", session_id, timings["total"], len(segments))
     except engine.TranscriptionError as exc:
         sessions.update(session_id, status="failed", stage="failed", failed_stage=current["stage"], error=str(exc), timings=timings)
@@ -326,6 +366,7 @@ def create_session(body: SessionIn) -> dict:
         "stage": "created",
         "warnings": [],
         "timings": {},
+        "test": body.test,
     }
     sessions.create(session)
     log.info("Session %s: created (%d participants, %s)", session["id"], len(ids), body.mode)
@@ -348,15 +389,18 @@ def upload_audio(session_id: str, file: UploadFile = File(...)) -> dict:
             detail=f"Not an audio file. Accepted types: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
-    # Copy in 1 MB pieces, stopping as soon as it's over the size limit.
+    # Copy in 1 MB pieces, stopping as soon as it's over the size limit, and
+    # take the file's fingerprint (SHA-256) on the way to spot repeat uploads.
     audio_path = config.AUDIO_DIR / f"{session_id}{extension}"
     size = 0
+    fingerprint = hashlib.sha256()
     try:
         with audio_path.open("wb") as out:
             while chunk := file.file.read(1024 * 1024):
                 size += len(chunk)
                 if size > config.MAX_UPLOAD_BYTES:
                     raise HTTPException(status_code=413, detail=f"File is larger than {config.MAX_UPLOAD_MB} MB.")
+                fingerprint.update(chunk)
                 out.write(chunk)
     except BaseException:
         audio_path.unlink(missing_ok=True)
@@ -365,12 +409,35 @@ def upload_audio(session_id: str, file: UploadFile = File(...)) -> dict:
         audio_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
+    # The same recording already has a finished (or in-progress) session: don't
+    # process it again. Test sessions skip this (the smoke test reuses one clip),
+    # and a failed earlier attempt doesn't block a retry.
+    audio_sha256 = fingerprint.hexdigest()
+    if not session.get("test"):
+        existing = _find_same_recording(audio_sha256, exclude_id=session_id)
+        if existing:
+            audio_path.unlink(missing_ok=True)
+            log.info("Session %s: upload refused, same recording as session %s", session_id, existing["id"])
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        "This recording was already processed."
+                        if existing["status"] == "ready"
+                        else "This recording is already being processed."
+                    ),
+                    "existing_session_id": existing["id"],
+                    "existing_status": existing["status"],
+                },
+            )
+
     sessions.update(
         session_id,
         status="uploaded",
         stage="uploaded",
         audio_file=audio_path.name,
         audio_bytes=size,
+        audio_sha256=audio_sha256,
         uploaded_at=sessions.now_iso(),
     )
     log.info("Session %s: uploaded %.1f MB (%s)", session_id, size / 1_000_000, extension)
@@ -468,3 +535,67 @@ def get_metrics(session_id: str) -> dict:
     if segments is None:
         raise HTTPException(status_code=500, detail="The transcript file is missing.")
     return {"metrics": metrics.participation(segments)}
+
+
+# Names the smoke test used before sessions were marked with "test". Only these
+# exact names count; real sessions are never matched.
+_OLD_TEST_NAMES = {"Smoke test", "Broken file test", "Long upload test"}
+SESSION_PAGE_SIZE = 30
+
+
+def _is_hidden(session: dict) -> bool:
+    """Test sessions and sessions never recorded are left out of the list by default."""
+    is_test = session.get("test") or session["name"] in _OLD_TEST_NAMES
+    return bool(is_test) or session["status"] == "created"
+
+
+def _length_seconds(session: dict) -> float | None:
+    """The recording length; filled in once from the transcript for older sessions."""
+    if "length_seconds" in session or session["status"] != "ready":
+        return session.get("length_seconds")
+    segments = sessions.load_transcript(session["id"]) or []
+    length = metrics.participation(segments)["session"]["length_seconds"]
+    sessions.update(session["id"], length_seconds=length)
+    return length
+
+
+@app.get("/api/sessions", dependencies=protected)
+def list_sessions(q: str = "", include_hidden: bool = False, offset: int = 0, limit: int = SESSION_PAGE_SIZE) -> dict:
+    """Past sessions, newest first, a page at a time.
+
+    q searches the session name and participant names/IDs (not the transcript).
+    Test sessions and never-recorded ones are hidden unless include_hidden.
+    Nothing is deleted; hidden sessions stay on disk.
+    """
+    query = q.strip().lower()
+    matches = []
+    for s in sessions.all_sessions():
+        if not include_hidden and _is_hidden(s):
+            continue
+        haystack = [s["name"]] + [p["label"] for p in s["participants"]] + [p["id"] for p in s["participants"]]
+        if query and not any(query in text.lower() for text in haystack):
+            continue
+        matches.append(s)
+    matches.sort(key=lambda s: s["created_at"], reverse=True)
+
+    limit = max(1, min(limit, 100))
+    page = matches[max(0, offset) : max(0, offset) + limit]
+    items = [
+        {
+            "id": s["id"],
+            "name": s["name"],
+            "mode": s["mode"],
+            "created_at": s["created_at"],
+            "status": s["status"],
+            "failed_stage": s.get("failed_stage"),
+            "participants": [{"id": p["id"], "label": p["label"]} for p in s["participants"]],
+            "length_seconds": _length_seconds(s),
+            "has_summary": sessions.has_summary(s["id"]),
+            "hidden": _is_hidden(s),
+        }
+        for s in page
+    ]
+    # Logs never include names or search text.
+    log.info("Sessions listed: %d of %d matching", len(items), len(matches))
+    return {"sessions": items, "total": len(matches), "has_more": offset + len(items) < len(matches)}
+

@@ -49,3 +49,11 @@ export function speakerRenamer(names: Record<string, string>): (text: string) =>
       return names[label] ?? match;
     });
 }
+
+/** An ISO timestamp as a short local date and time, e.g. "Oct 22, 7:46 PM". */
+export function formatSessionDate(iso: string): string {
+  const d = new Date(iso);
+  const hours = d.getHours() % 12 || 12;
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${hours}:${minutes} ${d.getHours() < 12 ? "AM" : "PM"}`;
+}

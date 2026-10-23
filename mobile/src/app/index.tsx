@@ -14,11 +14,12 @@
  * missing. The backend enforces the same rule.
  *
  * Pressing Start creates the session through the API, gets back a session id,
- * and opens the Record screen with that id.
+ * and opens the Record screen with that id. "Past sessions" (top right) opens
+ * the list of earlier sessions.
  */
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AddPersonForm } from "@/components/add-person-form";
 import { Button } from "@/components/button";
@@ -104,6 +105,15 @@ export default function SetupScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable accessibilityRole="button" onPress={() => router.push("/sessions")} hitSlop={8}>
+              <Text style={[styles.headerLink, { color: colors.primary }]}>Past sessions</Text>
+            </Pressable>
+          ),
+        }}
+      />
       {/* Shown only while no backend URL is configured (see src/lib/api.ts). */}
       {isMock && (
         <Text style={[styles.banner, { backgroundColor: colors.surface, color: colors.muted }]}>
@@ -222,5 +232,9 @@ const styles = StyleSheet.create({
   note: {
     fontSize: 15,
     marginVertical: 4,
+  },
+  headerLink: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

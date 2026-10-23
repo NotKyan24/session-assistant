@@ -18,6 +18,7 @@ Checks:
 4. Participation metrics: percentages add up to 100, speakers match the transcript.
 5. Speaker naming: name a speaker, reject an outsider, clear it again.
 6. Roster: add a test person, reject a duplicate, remove them.
+7. Past sessions: test sessions are hidden from the list unless asked for.
 
 Prints statuses, timings, speaker and section counts. It never prints
 transcript or summary text.
@@ -90,7 +91,10 @@ def post_file(url: str, name: str, content: bytes, content_type: str) -> tuple[i
 
 def new_session(base: str, consent_all: bool = True) -> tuple[int, dict]:
     participants = [{**p, "consented": consent_all or i == 0} for i, p in enumerate(PARTICIPANTS)]
-    return post_json(f"{base}/api/sessions", {"name": "Smoke test", "mode": "in_person", "participants": participants})
+    return post_json(
+        f"{base}/api/sessions",
+        {"name": "Smoke test", "mode": "in_person", "participants": participants, "test": True},
+    )
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -192,6 +196,16 @@ def main() -> None:
     status, _ = call("DELETE", f"{base}/api/roster/{test_id}")
     _, body = call("GET", f"{base}/api/roster")
     check("roster: person removed", status == 200 and not any(p["id"] == test_id for p in body["people"]))
+
+    _, body = call("GET", f"{base}/api/sessions")
+    check("past sessions: test session hidden", all(s["id"] != session_id for s in body["sessions"]), f"{body['total']} shown")
+    _, body = call("GET", f"{base}/api/sessions?include_hidden=true&q=smoke&limit=100")
+    listed = next((s for s in body["sessions"] if s["id"] == session_id), None)
+    check(
+        "past sessions: shown when asked, with length",
+        listed is not None and listed["hidden"] and listed["length_seconds"] and listed["has_summary"] is not None,
+        f"{listed['length_seconds'] if listed else '?'} s",
+    )
 
 
 if __name__ == "__main__":

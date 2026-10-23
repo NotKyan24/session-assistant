@@ -34,6 +34,8 @@ const STAGE_SECONDS: [Stage, number][] = [
 type MockSession = {
   id: string;
   name: string;
+  mode: "in_person" | "video";
+  createdAt: string;
   participants: { id: string; label: string; consented: boolean }[];
   speakerMap: Record<string, string>;
   // When the upload happened (milliseconds), or null before any upload.
@@ -170,6 +172,8 @@ export const mockApi: Api = {
     sessions.set(id, {
       id,
       name: session.name,
+      mode: session.mode,
+      createdAt: new Date().toISOString(),
       participants: session.participants,
       speakerMap: {},
       uploadedAt: null,
@@ -208,6 +212,32 @@ export const mockApi: Api = {
     if (!session) throw new Error("Session not found");
     if (currentStatus(session).status !== "ready") throw new Error("Summary not ready");
     return SAMPLE_SUMMARY;
+  },
+
+  async listSessions({ q = "", includeHidden = false, offset = 0 }) {
+    await delay(150);
+    const query = q.trim().toLowerCase();
+    const all = [...sessions.values()]
+      .filter((s) => includeHidden || s.uploadedAt !== null)
+      .filter(
+        (s) =>
+          !query ||
+          [s.name, ...s.participants.flatMap((p) => [p.label, p.id])].some((t) => t.toLowerCase().includes(query)),
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const page = all.slice(offset, offset + 30).map((s) => ({
+      id: s.id,
+      name: s.name,
+      mode: s.mode,
+      created_at: s.createdAt,
+      status: currentStatus(s).status,
+      failed_stage: currentStatus(s).failed_stage ?? null,
+      participants: s.participants.map(({ id, label }) => ({ id, label })),
+      length_seconds: currentStatus(s).status === "ready" ? Math.max(...SAMPLE_TRANSCRIPT.map((x) => x.end)) : null,
+      has_summary: currentStatus(s).status === "ready",
+      hidden: s.uploadedAt === null,
+    }));
+    return { sessions: page, total: all.length, has_more: offset + page.length < all.length };
   },
 
   async getMetrics(id) {
