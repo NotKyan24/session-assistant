@@ -15,8 +15,9 @@ Checks:
 2. A non-audio upload is rejected (415).
 3. The real flow: create → upload → poll every 3 s until ready → fetch the
    transcript and the summary (if the summary model was reachable).
-4. Speaker naming: name a speaker, reject an outsider, clear it again.
-5. Roster: add a test person, reject a duplicate, remove them.
+4. Participation metrics: percentages add up to 100, speakers match the transcript.
+5. Speaker naming: name a speaker, reject an outsider, clear it again.
+6. Roster: add a test person, reject a duplicate, remove them.
 
 Prints statuses, timings, speaker and section counts. It never prints
 transcript or summary text.
@@ -159,8 +160,16 @@ def main() -> None:
         counts = ", ".join(f"{s['title']}: {len(s['items'])}" for s in notes["sections"])
         check("summary returned", bool(notes["overview"]), f"model {notes['model']}")
         print(f"       items per section: {counts}")
+        print(f"       engagement notes: {len(notes.get('engagement', []))}")
     else:
         print(f"[INFO] no summary ({body.get('detail', status)}); see the warning above")
+
+    status, body = call("GET", f"{base}/api/sessions/{session_id}/metrics")
+    m = body.get("metrics", {})
+    total = round(sum(sp["percent"] for sp in m.get("speakers", [])))
+    same_speakers = sorted(sp["speaker"] for sp in m.get("speakers", [])) == speakers
+    check("participation metrics returned", status == 200 and total == 100 and same_speakers, f"{len(m.get('speakers', []))} speakers, {total}%")
+    print(f"       session: {m['session']}")
 
     first = speakers[0]
     status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {first: "facilitator"})

@@ -7,7 +7,7 @@
  * This screen asks the backend "where are you?" every 3 seconds (polling) and
  * highlights the current stage.
  *
- * - Ready: shows a "View transcript" button.
+ * - Ready: shows a "View results" button (notes, participation, transcript).
  * - Failed: shows which stage failed and the error message, plus "New session".
  * - Network trouble: shows a note and keeps trying.
  * Polling stops on ready or failed, and when the user leaves the screen.
@@ -98,7 +98,11 @@ export default function StatusScreen() {
       ))}
 
       {session?.status === "ready" && (
-        <Button title="View transcript" size="large" onPress={() => router.replace({ pathname: "/transcript", params: { id } })} />
+        <Button
+          title="View results"
+          size="large"
+          onPress={() => router.replace({ pathname: "/session/[id]/notes", params: { id } })}
+        />
       )}
       {/* dismissTo("/") closes every screen back to Setup, for a fresh start. */}
       {failed && <Button title="New session" variant="secondary" onPress={() => router.dismissTo("/")} />}

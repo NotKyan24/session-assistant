@@ -17,7 +17,7 @@
  * - Simulates a failure at the Converting stage if the uploaded file's name
  *   contains "fail", to test the failure screen.
  */
-import type { Api, Person, Segment, SessionStatus, Stage, Summary } from "./api";
+import type { Api, Metrics, Person, Segment, SessionStatus, Stage, Summary } from "./api";
 import { TEST_PARTICIPANTS } from "./participants";
 
 // How long each simulated stage lasts, in seconds, in order.
@@ -69,9 +69,58 @@ const SAMPLE_SUMMARY: Summary = {
     { title: "Goals / next steps", items: ["Start the reading assignment early instead of Sunday night"] },
     { title: "Follow-ups", items: ["Check in on the reading assignment next session"] },
   ],
+  engagement: [
+    { speaker: "Speaker 1", note: "Asked most of the questions and moved the conversation between topics." },
+    { speaker: "Speaker 2", note: "Gave longer, detailed answers, especially about the science project." },
+  ],
   model: "demo",
   created_at: "2026-10-14T00:00:00Z",
 };
+
+// A small version of backend/metrics.py, so demo mode shows real numbers for the sample.
+function sampleMetrics(segments: Segment[]): Metrics {
+  const per = new Map<string, { seconds: number; words: number; questions: number }>();
+  const pairs = new Map<string, number>();
+  let previous: string | null = null;
+  for (const seg of segments) {
+    const s = per.get(seg.speaker) ?? { seconds: 0, words: 0, questions: 0 };
+    s.seconds += seg.end - seg.start;
+    s.words += seg.text.split(/\s+/).filter(Boolean).length;
+    s.questions += (seg.text.match(/\?/g) ?? []).length;
+    per.set(seg.speaker, s);
+    if (previous && previous !== seg.speaker) {
+      const key = `${previous}|${seg.speaker}`;
+      pairs.set(key, (pairs.get(key) ?? 0) + 1);
+    }
+    previous = seg.speaker;
+  }
+  const total = [...per.values()].reduce((sum, s) => sum + s.seconds, 0);
+  const length = Math.max(0, ...segments.map((s) => s.end));
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  return {
+    session: {
+      length_seconds: round1(length),
+      speaking_seconds: round1(total),
+      silence_percent: length ? round1((100 * (length - total)) / length) : 0,
+    },
+    speakers: [...per.entries()]
+      .map(([speaker, s]) => ({
+        speaker,
+        speaking_seconds: round1(s.seconds),
+        percent: total ? round1((100 * s.seconds) / total) : 0,
+        words: s.words,
+        words_per_minute: s.seconds ? Math.round(s.words / (s.seconds / 60)) : 0,
+        questions: s.questions,
+      }))
+      .sort((a, b) => b.speaking_seconds - a.speaking_seconds),
+    interactions: [...pairs.entries()]
+      .map(([key, count]) => {
+        const [from, to] = key.split("|");
+        return { from, to, count };
+      })
+      .sort((a, b) => b.count - a.count),
+  };
+}
 
 // Small waits so the app shows its loading states, like over a real network.
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -159,6 +208,12 @@ export const mockApi: Api = {
     if (!session) throw new Error("Session not found");
     if (currentStatus(session).status !== "ready") throw new Error("Summary not ready");
     return SAMPLE_SUMMARY;
+  },
+
+  async getMetrics(id) {
+    const session = sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    return sampleMetrics(SAMPLE_TRANSCRIPT);
   },
 
   async setSpeakers(id, changes) {

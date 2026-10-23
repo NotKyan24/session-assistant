@@ -62,6 +62,7 @@ cd backend && python smoke_test.py ../data/audio/test.wav
 | `main.py` | The API endpoints and the background job queue (one job at a time) |
 | `transcribe.py` | The only file that uses WhisperX: convert → transcribe → align → identify speakers |
 | `summarize.py` | The only file that calls the summary model (Purple's lmstudio-oahu server, `m3-ult` Qwen 35B). It writes structured session notes; to change the headings, edit `SECTIONS` there. If it fails, the transcript still arrives, with a warning. |
+| `metrics.py` | Participation numbers per speaker (speaking time and %, words, questions, who responds to whom), computed exactly from the transcript |
 | `roster.py` | The shared participant roster in `data/roster.json`. Removing someone hides them from new sessions; past sessions keep their own list. |
 | `sessions.py` | Reads and writes `data/sessions/<id>.json`, `<id>.transcript.json` and `<id>.summary.json` |
 | `config.py` | Loads `.env` (models, upload limit, access key) and sets the folder paths |

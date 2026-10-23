@@ -5,7 +5,7 @@ The phone app staff use to run a session: confirm consent, record (or pick an au
 ## The flow
 
 ```
-Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready──▶ Transcript
+Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready──▶ Results (Notes · Participation · Transcript)
   ▲                                         │                  │
   └──────────────── New session ◀───────────┴──(failed)────────┘
 ```
@@ -15,7 +15,7 @@ Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready�
 | 1 | `src/app/index.tsx` | Name the session, pick in person/video, choose who's here from the shared roster (add or remove people there), tick consent for each. Start stays disabled until everyone chosen has consented. | `getRoster`, `addPerson`, `removePerson`, `createSession` |
 | 2 | `src/app/record.tsx` | Record with pause/resume, or choose an existing file. The screen stays awake while recording. | `uploadAudio` |
 | 3 | `src/app/processing.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
-| 4 | `src/app/transcript.tsx` | "Who's speaking?" to match each voice to a participant, AI session notes (if available), then `[mm:ss] Name: text`, one color per speaker. Names replace "Speaker N" in both. | `getSession`, `setSpeakers`, `getSummary`, `getTranscript` |
+| 4 | `src/app/session/[id]/` | **Results**, three tabs: **Notes** ("Who's speaking?" to match each voice to a participant, then the AI notes), **Participation** (speaking time and %, words, questions, who responds to whom, AI engagement notes) and **Transcript** (`[mm:ss] Name: text`). Names replace "Speaker N" on every tab. | `getSession`, `setSpeakers`, `getSummary`, `getMetrics`, `getTranscript` |
 
 ## How the code is organized
 
@@ -24,7 +24,9 @@ src/
   app/              screens (Expo Router: each file is a screen, named by its path)
     _layout.tsx     the navigator that stacks the screens
     index.tsx       Setup        record.tsx   Record
-    processing.tsx  Status       transcript.tsx Transcript
+    processing.tsx  Status
+    session/[id]/   Results: _layout.tsx (the tab bar), notes.tsx,
+                    participation.tsx, transcript.tsx
   components/       reusable pieces of UI
     button.tsx        the one button style
     consent-row.tsx   a participant's consent checkbox
@@ -34,8 +36,11 @@ src/
     roster-row.tsx    a roster person: in today's session? / remove
     add-person-form.tsx  add someone to the roster
     speaker-namer.tsx "Who's speaking?": match voices to participants
+    participation-card.tsx  participation numbers and who responds to whom
+    tab-button.tsx    a tab in the results tab bar
   lib/              logic with no UI
     api.ts            the only code that talks to the backend
+    session-results.tsx  data shared by the three results tabs (+ speaker names)
     mock-api.ts       the simulated backend for demo mode
     participants.ts   the hard-coded test roster
     format.ts         date, timer and speaker-name formatting

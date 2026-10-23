@@ -8,7 +8,8 @@
  *   getSession     → GET  /api/sessions/{id}          (Status screen, polled)
  *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
  *   getSummary     → GET  /api/sessions/{id}/summary    (Transcript screen)
- *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Transcript screen)
+ *   getMetrics     → GET  /api/sessions/{id}/metrics    (Participation page)
+ *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Notes page)
  *   getRoster / addPerson / removePerson → /api/roster  (Setup screen)
  *
  * Two implementations share the same shape (the `Api` type):
@@ -87,8 +88,27 @@ export type Segment = {
 export type Summary = {
   overview: string;
   sections: { title: string; items: string[] }[];
+  /** One AI-written note per speaker on how they took part ("Speaker 1", ...). */
+  engagement?: { speaker: string; note: string }[];
   model: string;
   created_at: string;
+};
+
+// Participation numbers, computed from the transcript (see backend/metrics.py).
+export type Metrics = {
+  session: { length_seconds: number; speaking_seconds: number; silence_percent: number };
+  /** Most speaking time first; "Unknown" (unattributed speech) last. */
+  speakers: {
+    speaker: string;
+    speaking_seconds: number;
+    /** Share of all speaking time; everyone adds up to 100. */
+    percent: number;
+    words: number;
+    words_per_minute: number;
+    questions: number;
+  }[];
+  /** "to" spoke right after "from", this many times. Most frequent first. */
+  interactions: { from: string; to: string; count: number }[];
 };
 
 // A file on the phone, ready to upload: where it is, its name and its type.
@@ -107,6 +127,7 @@ export type Api = {
   getTranscript(id: string): Promise<Segment[]>;
   /** null when the session has no summary (e.g. the summary model was unavailable). */
   getSummary(id: string): Promise<Summary | null>;
+  getMetrics(id: string): Promise<Metrics>;
   /** Set or clear (null) which participant each speaker label is. Returns the full map. */
   setSpeakers(id: string, changes: Record<string, string | null>): Promise<Record<string, string>>;
   getRoster(): Promise<Person[]>;
@@ -183,6 +204,8 @@ const httpApi: Api = {
       throw e;
     }
   },
+
+  getMetrics: async (id) => (await request<{ metrics: Metrics }>(`/api/sessions/${id}/metrics`)).metrics,
 
   setSpeakers: async (id, changes) => {
     const body = await request<{ speaker_map: Record<string, string> }>(`/api/sessions/${id}/speakers`, {

@@ -16,6 +16,9 @@ structured session notes:
         {"title": "Goals / next steps",  "items": [...]},
         {"title": "Follow-ups",          "items": [...]}
       ],
+      "engagement": [
+        {"speaker": "Speaker 1", "note": "One or two sentences on how they took part."}
+      ],
       "model": "<model name>",
       "created_at": "2026-10-14T18:00:00Z"
     }
@@ -24,7 +27,9 @@ To change the headings, edit SECTIONS below. The app shows whatever sections
 come back, so it doesn't need to change.
 
 How it works:
-1. The transcript is turned into plain lines, "[mm:ss] Speaker 1: text".
+1. The transcript is turned into plain lines, "[mm:ss] Speaker 1: text",
+   preceded by each speaker's participation numbers (from metrics.py) so the
+   engagement notes are grounded in measured facts.
 2. It is sent with instructions (PROMPT) to Purple Maia's model server
    (LLM_BASE_URL / LLM_API_KEY / LLM_MODEL in .env). The server speaks the
    standard OpenAI "chat completions" format, so any model on it can be used
@@ -46,6 +51,7 @@ import time
 
 import requests
 
+import metrics
 import sessions
 
 log = logging.getLogger("session_assistant.summarize")
@@ -69,10 +75,16 @@ Rules:
 - If a section has nothing, return an empty list for it.
 - Write in English.
 
+Engagement notes (one per speaker label listed in the participation numbers):
+- Describe only how the person took part, as observable in the transcript and the numbers: how much they spoke, answer length, whether they asked questions, whether they started topics or mostly responded, and how that changed over the session.
+- Do not judge emotions, mental state, behavior, risk or character. Do not use clinical terms.
+- One or two short sentences each.
+
 Return ONLY a JSON object, with no other text, in exactly this shape:
 {
   "overview": "2-3 sentences on what the session covered",
-%s
+%s,
+  "engagement": [{"speaker": "Speaker 1", "note": "how this person took part"}, ...]
 }"""
 
 
@@ -97,6 +109,28 @@ def _speaker(label: str) -> str:
 
 def _transcript_text(segments: list[dict]) -> str:
     return "\n".join(f"[{_clock(s['start'])}] {_speaker(s['speaker'])}: {s['text']}" for s in segments)
+
+
+def _participation_text(segments: list[dict]) -> str:
+    """The measured participation numbers, as plain lines for the model."""
+    m = metrics.participation(segments)
+    lines = ["Participation numbers (measured from the transcript):"]
+    for sp in m["speakers"]:
+        lines.append(
+            f"- {_speaker(sp['speaker'])}: {sp['percent']}% of speaking time ({_clock(sp['speaking_seconds'])}), "
+            f"{sp['words']} words, {sp['questions']} questions"
+        )
+    return "\n".join(lines)
+
+
+def _clean_engagement(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    notes = []
+    for item in value:
+        if isinstance(item, dict) and str(item.get("speaker", "")).strip() and str(item.get("note", "")).strip():
+            notes.append({"speaker": str(item["speaker"]).strip(), "note": str(item["note"]).strip()})
+    return notes
 
 
 def _system_prompt() -> str:
@@ -144,7 +178,7 @@ def summarize(segments: list[dict]) -> dict:
                 "max_tokens": config.LLM_MAX_TOKENS,
                 "messages": [
                     {"role": "system", "content": _system_prompt()},
-                    {"role": "user", "content": _transcript_text(segments)},
+                    {"role": "user", "content": f"{_participation_text(segments)}\n\nTranscript:\n{_transcript_text(segments)}"},
                 ],
             },
             timeout=config.LLM_TIMEOUT_SECONDS,
@@ -169,6 +203,7 @@ def summarize(segments: list[dict]) -> dict:
     notes = {
         "overview": str(raw.get("overview") or "").strip(),
         "sections": [{"title": s["title"], "items": _clean_items(raw.get(s["key"]))} for s in SECTIONS],
+        "engagement": _clean_engagement(raw.get("engagement")),
         "model": config.LLM_MODEL,
         "created_at": sessions.now_iso(),
     }

@@ -16,6 +16,7 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     GET  /api/sessions/{id}               status + current stage (the app polls this)
     GET  /api/sessions/{id}/transcript    the segments, once status is "ready"
     GET  /api/sessions/{id}/summary       the structured session notes, once "ready"
+    GET  /api/sessions/{id}/metrics       participation numbers, once "ready"
     PUT  /api/sessions/{id}/speakers      say which participant each speaker is
     GET  /api/roster                      everyone on the shared roster
     POST /api/roster                      add someone to the roster
@@ -51,6 +52,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+import metrics
 import roster
 import sessions
 import summarize as summarizer
@@ -454,3 +456,15 @@ def remove_from_roster(person_id: str) -> dict:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     log.info("Roster: removed %s", person_id)
     return {"removed": person_id}
+
+
+@app.get("/api/sessions/{session_id}/metrics", dependencies=protected)
+def get_metrics(session_id: str) -> dict:
+    """Participation numbers per speaker (see metrics.py), computed from the transcript on request."""
+    session = _get_session_or_404(session_id)
+    if session["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Participation numbers are ready once the transcript is.")
+    segments = sessions.load_transcript(session_id)
+    if segments is None:
+        raise HTTPException(status_code=500, detail="The transcript file is missing.")
+    return {"metrics": metrics.participation(segments)}
