@@ -11,12 +11,13 @@
  *
  * Test sessions (from the smoke test) and sessions never recorded are hidden
  * unless "Show test and unrecorded sessions" is on. Nothing is deleted.
- * Pull down to refresh.
+ * Pull down to refresh. "New session" (bottom) goes back to a fresh Setup screen.
  */
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { Button } from "@/components/button";
 import { SessionRow } from "@/components/session-row";
 import { api, type SessionListItem } from "@/lib/api";
 import { useColors } from "@/lib/theme";
@@ -81,65 +82,78 @@ export default function PastSessionsScreen() {
   }
 
   return (
-    <FlatList
-      data={items ?? []}
-      keyExtractor={(s) => s.id}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      onEndReached={loadMore}
-      onEndReachedThreshold={0.5}
-      ListHeaderComponent={
-        <View style={styles.header}>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search by session or participant name"
-            placeholderTextColor={colors.muted}
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-            accessibilityLabel="Search past sessions"
-            style={[styles.search, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
-          />
-          {items && (
-            <Text style={[styles.count, { color: colors.muted }]}>
-              {total} {total === 1 ? "session" : "sessions"}
-              {query ? ` matching "${query}"` : ""}
+    <View style={styles.screen}>
+      <FlatList
+        data={items ?? []}
+        keyExtractor={(s) => s.id}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        ListHeaderComponent={
+          <View style={styles.header}>
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search by session or participant name"
+              placeholderTextColor={colors.muted}
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+              accessibilityLabel="Search past sessions"
+              style={[styles.search, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+            />
+            {items && (
+              <Text style={[styles.count, { color: colors.muted }]}>
+                {total} {total === 1 ? "session" : "sessions"}
+                {query ? ` matching "${query}"` : ""}
+              </Text>
+            )}
+            {error && <Text style={[styles.count, { color: colors.danger }]}>{error}</Text>}
+          </View>
+        }
+        renderItem={({ item }) => <SessionRow session={item} onPress={() => open(item)} />}
+        ListEmptyComponent={
+          items === null && !error ? (
+            <ActivityIndicator style={styles.loading} />
+          ) : (
+            <Text style={[styles.empty, { color: colors.muted }]}>
+              {query ? "No sessions match that search." : "No sessions yet. Recorded sessions will show up here."}
             </Text>
-          )}
-          {error && <Text style={[styles.count, { color: colors.danger }]}>{error}</Text>}
-        </View>
-      }
-      renderItem={({ item }) => <SessionRow session={item} onPress={() => open(item)} />}
-      ListEmptyComponent={
-        items === null && !error ? (
-          <ActivityIndicator style={styles.loading} />
-        ) : (
-          <Text style={[styles.empty, { color: colors.muted }]}>
-            {query ? "No sessions match that search." : "No sessions yet. Recorded sessions will show up here."}
-          </Text>
-        )
-      }
-      ListFooterComponent={
-        <View style={styles.footer}>
-          {loadingMore && <ActivityIndicator />}
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: includeHidden }}
-            onPress={() => setIncludeHidden((v) => !v)}
-            hitSlop={8}
-          >
-            <Text style={[styles.toggle, { color: colors.primary }]}>
-              {includeHidden ? "Hide test and unrecorded sessions" : "Show test and unrecorded sessions"}
-            </Text>
-          </Pressable>
-        </View>
-      }
-    />
+          )
+        }
+        ListFooterComponent={
+          <View style={styles.footer}>
+            {loadingMore && <ActivityIndicator />}
+            <Pressable
+              accessibilityRole="switch"
+              accessibilityState={{ checked: includeHidden }}
+              onPress={() => setIncludeHidden((v) => !v)}
+              hitSlop={8}
+            >
+              <Text style={[styles.toggle, { color: colors.primary }]}>
+                {includeHidden ? "Hide test and unrecorded sessions" : "Show test and unrecorded sessions"}
+              </Text>
+            </Pressable>
+          </View>
+        }
+      />
+      {/* dismissTo("/") closes this screen and returns to Setup. */}
+      <View style={[styles.newSession, { borderColor: colors.border, backgroundColor: colors.background }]}>
+        <Button title="New session" onPress={() => router.dismissTo("/")} />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+  newSession: {
+    padding: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
   container: {
     padding: 16,
   },

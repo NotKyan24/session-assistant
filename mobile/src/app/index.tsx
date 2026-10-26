@@ -9,6 +9,9 @@
  *    People can be added to or removed from the roster here too.
  * 4. Checks a consent box for every person in today's session.
  *
+ * Every session starts fresh: once Start succeeds, the screen clears who was
+ * chosen and their consent, so it's never carried over to the next session.
+ *
  * Consent rule: **Start** stays disabled until at least one person is in the
  * session and every one of them has consented, and a note names who's still
  * missing. The backend enforces the same rule.
@@ -96,6 +99,12 @@ export default function SetupScreen() {
         participants: inSession.map((p) => ({ ...p, consented: !!consent[p.id] })),
       });
       router.push({ pathname: "/record", params: { id } });
+      // This screen stays loaded underneath the session. Clear it now, so the
+      // next session starts fresh: consent must be given again every time.
+      setConsent({});
+      setIncluded({});
+      setName(defaultSessionName());
+      setMode("in_person");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the session.");
     } finally {
