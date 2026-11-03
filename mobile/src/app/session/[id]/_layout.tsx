@@ -2,9 +2,9 @@
  * SESSION RESULTS LAYOUT (flow step 4): Setup → Record → Status → **Results**
  *
  * A finished session's results are three pages, switched with tabs at the top:
- *   Notes          "Who's speaking?" (name each voice), then the AI session notes
+ *   Notes          the AI session notes
  *   Participation  how much each person took part, plus AI engagement notes
- *   Transcript     the transcript lines only
+ *   Transcript     "Who's speaking?" (name each voice), then the transcript lines
  * Routes: /session/<id>/notes, /session/<id>/participation, /session/<id>/transcript.
  *
  * Uses Expo Router's custom tabs (expo-router/ui), which let the tab bar sit
