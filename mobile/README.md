@@ -12,10 +12,10 @@ Setup ──Start──▶ Record ──Stop/upload──▶ Status ──Ready�
 
 | Step | Screen file | What happens | API call |
 | --- | --- | --- | --- |
-| 1 | `src/app/index.tsx` | Name the session, pick in person/video, choose who's here from the shared roster (add or remove people there), tick consent for each. Start stays disabled until everyone chosen has consented. | `getRoster`, `addPerson`, `removePerson`, `createSession` |
+| 1 | `src/app/index.tsx` | Name the session. In one Participants list (the shared roster), mark who's here today and tick **Consents** on each of their rows; add or remove people there too. Start stays disabled until everyone marked here has consented. | `getRoster`, `addPerson`, `removePerson`, `createSession` |
 | 2 | `src/app/record.tsx` | Record with pause/resume, or choose an existing file. The screen stays awake while recording. | `uploadAudio` |
 | 3 | `src/app/processing.tsx` | Checks progress every 3 s and shows the current stage. | `getSession` (repeated) |
-| 4 | `src/app/session/[id]/` | **Results**, three tabs: **Notes** (the AI notes), **Participation** (speaking time and %, words, questions, who responds to whom, AI engagement notes) and **Transcript** ("Who's speaking?" to match each voice to a participant, then `[mm:ss] Name: text`). Names replace "Speaker N" on every tab. | `getSession`, `setSpeakers`, `getSummary`, `getMetrics`, `getTranscript` |
+| 4 | `src/app/session/[id]/` | **Results**, three tabs: **Notes** (the AI notes), **Participation** (speaking time and %, words, questions, who responds to whom, AI engagement notes) and **Transcript** ("Who's speaking?" to match each voice to a participant, then `[mm:ss] Name: text`; tap a line to fix who said it). Names replace "Speaker N" on every tab. | `getSession`, `setSpeakers`, `getSummary`, `getMetrics`, `getTranscript` |
 
 **Past sessions:** the "Past sessions" button (top right of Setup) lists earlier sessions, newest first, with search by session or participant name. Tapping one opens its results (or its Status screen if it's still processing or failed). Test sessions and never-recorded ones are hidden unless you turn on "Show test and unrecorded sessions"; nothing is deleted. Uploading a recording that already has a finished or in-progress session is refused ("This recording was already processed"), with a button to open the existing results; a recording whose earlier session failed can be uploaded again.
 
@@ -32,13 +32,13 @@ src/
                     participation.tsx, transcript.tsx
   components/       reusable pieces of UI
     button.tsx        the one button style
-    consent-row.tsx   a participant's consent checkbox
     level-meter.tsx   the microphone loudness bar
     stage-list.tsx    the processing checklist
     summary-card.tsx  the AI-written session notes
-    roster-row.tsx    a roster person: in today's session? / remove
+    roster-row.tsx    a participant row: here today? / consents / remove
     add-person-form.tsx  add someone to the roster
     speaker-namer.tsx "Who's speaking?": match voices to participants
+    transcript-line.tsx  one transcript line; tap to fix who said it
     participation-card.tsx  participation numbers and who responds to whom
     tab-button.tsx    a tab in the results tab bar
     session-row.tsx   one row in the Past sessions list

@@ -20,6 +20,7 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     GET  /api/sessions/{id}/summary       the structured session notes, once "ready"
     GET  /api/sessions/{id}/metrics       participation numbers, once "ready"
     PUT  /api/sessions/{id}/speakers      say which participant each speaker is
+    PUT  /api/sessions/{id}/lines/{n}     fix who said one transcript line
     GET  /api/roster                      everyone on the shared roster
     POST /api/roster                      add someone to the roster
     DELETE /api/roster/{person_id}        remove someone (past sessions keep them)
@@ -48,7 +49,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -138,7 +138,6 @@ class PersonIn(BaseModel):
 
 class SessionIn(BaseModel):
     name: str = Field(min_length=1, max_length=200, examples=["Tue group, Oct 13"])
-    mode: Literal["in_person", "video"]
     participants: list[ParticipantIn] = Field(min_length=1, max_length=50)
     # Set only by smoke_test.py, so test sessions stay out of the Past sessions list.
     test: bool = False
@@ -223,7 +222,6 @@ def _public_view(session: dict) -> dict:
     return {
         "id": session["id"],
         "name": session["name"],
-        "mode": session["mode"],
         "created_at": session["created_at"],
         "participants": session["participants"],
         "status": session["status"],
@@ -238,6 +236,8 @@ def _public_view(session: dict) -> dict:
         "timings": session.get("timings", {}),
         # Which participant (by id) each speaker label belongs to, once staff say so.
         "speaker_map": session.get("speaker_map", {}),
+        # Staff fixes for single lines: line number (as text) -> participant id.
+        "line_speakers": session.get("line_speakers", {}),
     }
 
 
@@ -283,8 +283,8 @@ def _run_job(session_id: str, audio_path: Path) -> None:
             on_stage=on_stage,
             on_progress=on_progress,
             on_warning=on_warning,
-            # More speakers than participants is impossible, so cap detection there.
-            max_speakers=len(session["participants"]),
+            # Look for exactly as many voices as people marked here (see transcribe.py).
+            num_speakers=len(session["participants"]),
         )
         sessions.save_transcript(session_id, segments)
 
@@ -356,7 +356,6 @@ def create_session(body: SessionIn) -> dict:
     session = {
         "id": sessions.new_id(),
         "name": body.name.strip(),
-        "mode": body.mode,
         "created_at": created,
         # Stored by id; label is display-only. Consent is timestamped per person.
         "participants": [
@@ -369,7 +368,7 @@ def create_session(body: SessionIn) -> dict:
         "test": body.test,
     }
     sessions.create(session)
-    log.info("Session %s: created (%d participants, %s)", session["id"], len(ids), body.mode)
+    log.info("Session %s: created (%d participants)", session["id"], len(ids))
     return {"id": session["id"]}
 
 
@@ -534,7 +533,55 @@ def get_metrics(session_id: str) -> dict:
     segments = sessions.load_transcript(session_id)
     if segments is None:
         raise HTTPException(status_code=500, detail="The transcript file is missing.")
-    return {"metrics": metrics.participation(segments)}
+    return {"metrics": metrics.participation(_by_person(session, segments))}
+
+
+def _by_person(session: dict, segments: list[dict]) -> list[dict]:
+    """The transcript with each line credited to a person, for participation numbers.
+
+    A line's person is, in order: a staff fix for that line (line_speakers), the
+    participant its speaker label was named as (speaker_map), or the speaker label
+    itself if nobody has been named. So two voices named as the same person count
+    as one, and a fixed line counts for whoever staff picked. Keys are participant
+    ids or speaker labels; the app shows names for both.
+    """
+    fixes = session.get("line_speakers", {})
+    names = session.get("speaker_map", {})
+    return [
+        {**seg, "speaker": fixes.get(str(i)) or names.get(seg["speaker"]) or seg["speaker"]}
+        for i, seg in enumerate(segments)
+    ]
+
+
+class LineSpeakerIn(BaseModel):
+    # null puts the line back to the automatic speaker.
+    participant_id: str | None
+
+
+@app.put("/api/sessions/{session_id}/lines/{index}", dependencies=protected)
+def set_line_speaker(session_id: str, index: int, body: LineSpeakerIn) -> dict:
+    """Fix who said one transcript line (by its position, 0 = first line).
+
+    Stored by participant id. Only participants of this session are accepted.
+    The transcript itself isn't changed; the fix is applied when it's shown and
+    when participation is counted.
+    """
+    session = _get_session_or_404(session_id)
+    if session["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Lines can be fixed once the transcript is ready.")
+    segments = sessions.load_transcript(session_id) or []
+    if not 0 <= index < len(segments):
+        raise HTTPException(status_code=404, detail="There's no such line in this transcript.")
+    fixes = dict(session.get("line_speakers", {}))
+    if body.participant_id is None:
+        fixes.pop(str(index), None)
+    elif body.participant_id not in {p["id"] for p in session["participants"]}:
+        raise HTTPException(status_code=400, detail=f"{body.participant_id} isn't a participant in this session.")
+    else:
+        fixes[str(index)] = body.participant_id
+    sessions.update(session_id, line_speakers=fixes)
+    log.info("Session %s: line fixes updated (%d lines fixed)", session_id, len(fixes))
+    return {"line_speakers": fixes}
 
 
 # Names the smoke test used before sessions were marked with "test". Only these
@@ -584,7 +631,6 @@ def list_sessions(q: str = "", include_hidden: bool = False, offset: int = 0, li
         {
             "id": s["id"],
             "name": s["name"],
-            "mode": s["mode"],
             "created_at": s["created_at"],
             "status": s["status"],
             "failed_stage": s.get("failed_stage"),

@@ -34,10 +34,10 @@ const STAGE_SECONDS: [Stage, number][] = [
 type MockSession = {
   id: string;
   name: string;
-  mode: "in_person" | "video";
   createdAt: string;
   participants: { id: string; label: string; consented: boolean }[];
   speakerMap: Record<string, string>;
+  lineSpeakers: Record<string, string>;
   // When the upload happened (milliseconds), or null before any upload.
   uploadedAt: number | null;
   /** File names containing "fail" simulate a failed job. */
@@ -135,7 +135,13 @@ function newId(): string {
 // Walks through the stages, subtracting each stage's duration from the time
 // since upload. The stage where the time runs out is the current one.
 function currentStatus(session: MockSession): SessionStatus {
-  const base = { id: session.id, name: session.name, participants: session.participants, speaker_map: session.speakerMap };
+  const base = {
+    id: session.id,
+    name: session.name,
+    participants: session.participants,
+    speaker_map: session.speakerMap,
+    line_speakers: session.lineSpeakers,
+  };
   if (session.uploadedAt === null) {
     return { ...base, status: "created", stage: "created" };
   }
@@ -172,10 +178,10 @@ export const mockApi: Api = {
     sessions.set(id, {
       id,
       name: session.name,
-      mode: session.mode,
       createdAt: new Date().toISOString(),
       participants: session.participants,
       speakerMap: {},
+      lineSpeakers: {},
       uploadedAt: null,
       shouldFail: false,
     });
@@ -228,7 +234,6 @@ export const mockApi: Api = {
     const page = all.slice(offset, offset + 30).map((s) => ({
       id: s.id,
       name: s.name,
-      mode: s.mode,
       created_at: s.createdAt,
       status: currentStatus(s).status,
       failed_stage: currentStatus(s).failed_stage ?? null,
@@ -243,7 +248,12 @@ export const mockApi: Api = {
   async getMetrics(id) {
     const session = sessions.get(id);
     if (!session) throw new Error("Session not found");
-    return sampleMetrics(SAMPLE_TRANSCRIPT);
+    // Like the backend: count each line for its person (line fix, then named voice, then label).
+    const byPerson = SAMPLE_TRANSCRIPT.map((seg, i) => ({
+      ...seg,
+      speaker: session.lineSpeakers[String(i)] ?? session.speakerMap[seg.speaker] ?? seg.speaker,
+    }));
+    return sampleMetrics(byPerson);
   },
 
   async setSpeakers(id, changes) {
@@ -254,6 +264,14 @@ export const mockApi: Api = {
       else session.speakerMap[speaker] = personId;
     }
     return { ...session.speakerMap };
+  },
+
+  async setLineSpeaker(id, index, participantId) {
+    const session = sessions.get(id);
+    if (!session) throw new Error("Session not found");
+    if (participantId === null) delete session.lineSpeakers[String(index)];
+    else session.lineSpeakers[String(index)] = participantId;
+    return { ...session.lineSpeakers };
   },
 
   async getRoster() {

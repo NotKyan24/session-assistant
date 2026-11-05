@@ -13,8 +13,8 @@ What comes after the Day 1 end-to-end path, in the order we plan to work on it. 
 | 3 | Participation metrics and risk notes in summaries | ✅ Participation done (Oct 22); risk notes need Joe's input |
 | 4 | Session history | ✅ Past sessions screen done (Oct 22); retention, delete and export wait on Joe |
 | 5 | Hawaiian words and names | Planned; needs a starter glossary |
-| 6 | In person vs. video | Waiting on Joe |
-| 7 | Team testing, then real use | Waiting on hosting |
+| 6 | In person vs. video | ✅ Removed (Nov 2) |
+| 7 | Team testing, then real use | Deferred until the planned features are done (decided Nov 2) |
 
 ### 1. Speaker naming
 
@@ -59,19 +59,34 @@ Both need a **glossary** of Hawaiian words, place names and people's names, star
 
 ### 6. In person vs. video
 
-The toggle is saved with each session but doesn't change anything yet. Options: give video sessions their own guidance (upload the call's own recording; speaker limit = people on the call), or remove the toggle until its purpose is decided.
+Removed on Nov 2: the toggle never changed anything, so Setup now has just the session name and one Participants list (here today + consent on each row). The saved `mode` was also removed from existing sessions. If video sessions ever need their own handling (e.g. uploading the call's own recording), it can come back with a real purpose.
 
 ### 7. Team testing, then real use
 
+**Deferred** until the planned features are in place. The plan so far, so it's ready when we pick it up:
+
+- **Expo Go isn't for shipping** (Expo's docs call it a playground). Testers get a real app built with Expo Build (formerly EAS Build), and later changes reach them through Expo Update without a reinstall.
+- **Joe uses an iPhone.** First build: **internal distribution** (register his iPhone once, install from a link, no Apple review). Later, **TestFlight** for more testers (up to 100 on Purple's team). Both need **Purple's Apple Developer account** ($99/yr) and an Expo account or organization.
+- **Fallback:** the backend serves the app's web build, so testers can use a **web link** in Safari.
+- **Before any of that:**
+  - **per-tester sign-in** (username + password, tokens that expire, accounts you can disable, sessions record who created them), replacing the shared key built into the app
+  - a **"test version" banner**: test or consented staff recordings only, no youth sessions
 - **Team testing**, with test audio only:
-  - the backend on a Purple server with an `https://` address (ideally with a GPU)
-  - the app distributed through EAS Build to TestFlight and an Android test build
+  - the backend on a **Purple server** with an `https://` address (ideally the RTX 6000 GPU machine). Audio then leaves this Mac, which needs Joe's OK and an AGENTS.md rule update.
 - **Real staff use additionally needs:**
   - sign-in and roles, with per-person access
   - Purple's data policy: retention, deletion, access, consent records
   - likely a privacy review
 
 No real counseling recordings go through the system until then.
+
+## Speaker accuracy (Nov 2)
+
+With many people (11 in a 10-minute test), similar voices got merged: "at most 11" found 10 speakers, one with 19% of the talk. Now:
+- **Exact headcount:** speaker identification looks for exactly as many voices as people marked "here today". The Setup screen asks staff to mark only people who will speak.
+- **Line fixes:** on the Transcript tab, tap a line to say who really said it. Participation numbers count per person, so fixes and two voices named as the same person are combined.
+
+Still open: re-identify speakers on an existing session without re-uploading; per-participant Zoom audio files for video calls; optional voice samples (needs Joe's OK on storing voiceprints).
 
 ## Smaller items
 
@@ -82,9 +97,8 @@ No real counseling recordings go through the system until then.
 
 ## Questions for Joe (and David)
 
-- **Video toggle:** what should it change? Is there a recording flow doc?
 - **Hawaiian:** who can start the glossary?
-- **Hosting:** which Purple server, and is there an Apple Developer account for TestFlight?
+- **Hosting:** which Purple server (and its `https://` address, login, disk space, backups)? Does Purple have an Apple Developer account and an Expo organization you can be added to? Is it OK for audio to go to that server?
 - **Notes:** are the four headings right (topics, concerns, goals / next steps, follow-ups)?
 - **Risk notes:** which categories, and what's the staff protocol when one is flagged?
 - **Data:** what's kept, for how long, and who can see it? Is export needed?

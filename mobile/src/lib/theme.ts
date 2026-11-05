@@ -39,5 +39,23 @@ export function useColors(): Colors {
   return useColorScheme() === "dark" ? dark : light;
 }
 
-/** One color per speaker on the Transcript screen; repeats after six speakers. */
-export const SPEAKER_COLORS = ["#1D6FE0", "#C4320A", "#079455", "#7A5AF8", "#DD2590", "#0E9384"];
+/**
+ * One color per speaker (transcript, participation bars, "Who's speaking?").
+ * Twelve distinct hues, readable on light and dark backgrounds, so groups of up
+ * to 12 voices never share a color; after that they repeat. Unattributed
+ * speech ("Unknown") is always grey.
+ */
+export const SPEAKER_COLORS = [
+  "#1D6FE0", // blue
+  "#C4320A", // red-orange
+  "#079455", // green
+  "#7A5AF8", // violet
+  "#DD2590", // pink
+  "#0E9384", // teal
+  "#A16207", // gold
+  "#3538CD", // indigo
+  "#4D7C0F", // olive
+  "#A21CAF", // magenta
+  "#0891B2", // cyan
+  "#9F5B35", // brown
+];

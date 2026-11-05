@@ -10,7 +10,8 @@
  *   getTranscript  → GET  /api/sessions/{id}/transcript (Transcript screen)
  *   getSummary     → GET  /api/sessions/{id}/summary    (Transcript screen)
  *   getMetrics     → GET  /api/sessions/{id}/metrics    (Participation page)
- *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Notes page)
+ *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Transcript page)
+ *   setLineSpeaker → PUT  /api/sessions/{id}/lines/{n}  (Transcript page)
  *   getRoster / addPerson / removePerson → /api/roster  (Setup screen)
  *
  * Two implementations share the same shape (the `Api` type):
@@ -26,8 +27,6 @@
 import { mockApi } from "./mock-api";
 import { uploadFile } from "./upload";
 
-// "Where" the session happens, chosen on the Setup screen.
-export type SessionMode = "in_person" | "video";
 
 // The backend's processing stages, in order. "created" means no audio yet.
 export type Stage =
@@ -50,7 +49,6 @@ export type Person = {
 
 export type NewSession = {
   name: string;
-  mode: SessionMode;
   participants: { id: string; label: string; consented: boolean }[];
 };
 
@@ -74,6 +72,8 @@ export type SessionStatus = {
   participants?: { id: string; label: string; consented: boolean }[];
   /** Which participant id each speaker label is, e.g. { SPEAKER_00: "facilitator" }. */
   speaker_map?: Record<string, string>;
+  /** Staff fixes for single lines: line number (as text) -> participant id. */
+  line_speakers?: Record<string, string>;
 };
 
 // One line of the transcript: who spoke, when (in seconds), and what they said.
@@ -116,7 +116,6 @@ export type Metrics = {
 export type SessionListItem = {
   id: string;
   name: string;
-  mode: SessionMode;
   created_at: string;
   status: Stage;
   failed_stage?: Stage | null;
@@ -151,6 +150,8 @@ export type Api = {
   getMetrics(id: string): Promise<Metrics>;
   /** Set or clear (null) which participant each speaker label is. Returns the full map. */
   setSpeakers(id: string, changes: Record<string, string | null>): Promise<Record<string, string>>;
+  /** Fix who said one line (0 = first line); null puts it back to automatic. Returns all fixes. */
+  setLineSpeaker(id: string, index: number, participantId: string | null): Promise<Record<string, string>>;
   getRoster(): Promise<Person[]>;
   addPerson(person: Person): Promise<Person>;
   removePerson(personId: string): Promise<void>;
@@ -264,6 +265,15 @@ const httpApi: Api = {
       body: JSON.stringify(changes),
     });
     return body.speaker_map;
+  },
+
+  setLineSpeaker: async (id, index, participantId) => {
+    const body = await request<{ line_speakers: Record<string, string> }>(`/api/sessions/${id}/lines/${index}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participant_id: participantId }),
+    });
+    return body.line_speakers;
   },
 
   getRoster: async () => (await request<{ people: Person[] }>("/api/roster")).people,

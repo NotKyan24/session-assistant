@@ -2,7 +2,7 @@
 SESSION STORAGE: one JSON file per session, no database.
 
 Files, all in data/sessions/ (gitignored):
-    <id>.json             the session: name, mode, participants + consent,
+    <id>.json             the session: name, participants + consent,
                           status, stage, errors, warnings, timings
     <id>.transcript.json  the transcript segments, once ready (kept separate so
                           the status file stays small and is easy to delete)

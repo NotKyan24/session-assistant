@@ -3,7 +3,7 @@ TRANSCRIPTION ENGINE: the only file that knows about WhisperX.
 
 The rest of the backend calls one function:
 
-    transcribe(path, on_stage=..., on_progress=..., on_warning=..., max_speakers=...) -> segments
+    transcribe(path, on_stage=..., on_progress=..., on_warning=..., num_speakers=...) -> segments
 
 and gets back a list of {"speaker", "start", "end", "text"} dicts. To try a
 different speech-to-text engine later, rewrite this file and keep that shape.
@@ -111,10 +111,10 @@ def _load_diarizer(device: str):
     return DiarizationPipeline(token=config.HF_TOKEN, device=device)
 
 
-def _diarize(audio, max_speakers, on_progress):
+def _diarize(audio, num_speakers, on_progress):
     """Identify speakers; if the GPU fails, switch to the CPU for good and retry once."""
     try:
-        return _models["diarize"](audio, max_speakers=max_speakers, progress_callback=on_progress)
+        return _models["diarize"](audio, num_speakers=num_speakers, progress_callback=on_progress)
     except Exception as exc:  # noqa: BLE001
         if _models.get("diarize_device") in (None, config.WHISPER_DEVICE):
             raise
@@ -122,7 +122,7 @@ def _diarize(audio, max_speakers, on_progress):
         _models["diarize_device"] = config.WHISPER_DEVICE
         _models["diarize"] = _load_diarizer(config.WHISPER_DEVICE)
         on_progress(0.0)
-        return _models["diarize"](audio, max_speakers=max_speakers, progress_callback=on_progress)
+        return _models["diarize"](audio, num_speakers=num_speakers, progress_callback=on_progress)
 
 
 def models_loaded() -> bool:
@@ -150,7 +150,7 @@ def transcribe(
     on_stage: Callable[[str], None] = lambda stage: None,
     on_progress: Callable[[float], None] = lambda percent: None,
     on_warning: Callable[[str], None] = lambda message: None,
-    max_speakers: int | None = None,
+    num_speakers: int | None = None,
 ) -> list[Segment]:
     """Turn an audio file into speaker-labeled segments.
 
@@ -160,8 +160,13 @@ def transcribe(
     on_progress:  called with 0-100 as the current step advances (steps 2-4).
                   It can be called often; the caller decides how often to save.
     on_warning:   called with a user-facing message for non-fatal problems.
-    max_speakers: upper limit for speaker detection (e.g. the number of
-                  participants); None lets the model decide.
+    num_speakers: how many voices to look for, exactly (the number of people
+                  marked here). Exact works much better than "at most N": with
+                  "at most", similar voices (e.g. several men) were merged, so
+                  11 people came out as 10 speakers, one holding 19% of the
+                  talk; "exactly 11" split them back out. The catch: if
+                  someone present never speaks, another voice may be split in
+                  two. None lets the model decide.
     """
     import whisperx
 
@@ -203,7 +208,7 @@ def transcribe(
             on_warning("Speakers could not be identified: the speaker model isn't available on the server.")
         else:
             try:
-                speaker_turns = _diarize(audio, max_speakers, on_progress)
+                speaker_turns = _diarize(audio, num_speakers, on_progress)
                 result = whisperx.assign_word_speakers(speaker_turns, result)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Speaker identification failed (%s); returning transcript without speakers", type(exc).__name__)

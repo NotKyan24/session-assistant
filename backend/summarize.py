@@ -160,14 +160,12 @@ def _clean_items(value) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def summarize(segments: list[dict]) -> dict:
-    """Turn transcript segments into structured session notes (see the top of this file)."""
-    if not is_configured():
-        raise SummaryError("Summaries aren't set up on the server (LLM_BASE_URL / LLM_API_KEY missing).")
-    if not segments:
-        raise SummaryError("There's no speech to summarize.")
+# A cut-off or malformed reply is retried once; the model's output varies run to run.
+ATTEMPTS = 2
 
-    started = time.monotonic()
+
+def _ask_model(segments: list[dict]) -> dict:
+    """One request to the model. Returns its JSON notes, or raises SummaryError."""
     try:
         response = requests.post(
             f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions",
@@ -175,6 +173,9 @@ def summarize(segments: list[dict]) -> dict:
             json={
                 "model": config.LLM_MODEL,
                 "temperature": 0.2,  # Low: stick to the transcript, little creativity.
+                # The model "thinks" before answering, and thinking counts against this
+                # limit (about 2,800 tokens for a 1-minute clip, more for long sessions).
+                # Too low a limit cuts the notes off mid-way.
                 "max_tokens": config.LLM_MAX_TOKENS,
                 "messages": [
                     {"role": "system", "content": _system_prompt()},
@@ -195,11 +196,44 @@ def summarize(segments: list[dict]) -> dict:
         raise SummaryError(f"The summary model server returned an error (HTTP {response.status_code}).")
 
     try:
-        content = response.json()["choices"][0]["message"]["content"] or ""
+        body = response.json()
+        choice = body["choices"][0]
+        content = choice["message"]["content"] or ""
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise SummaryError("The summary model server sent an unexpected reply.") from exc
 
-    raw = _extract_json(content)
+    # Numbers only, for diagnosis: how the reply ended and how many tokens it used.
+    usage = body.get("usage") or {}
+    reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+    log.info(
+        "Summary reply: finish=%s, output tokens=%s (thinking %s), limit=%s",
+        choice.get("finish_reason"), usage.get("completion_tokens"), reasoning, config.LLM_MAX_TOKENS,
+    )
+    if choice.get("finish_reason") == "length":
+        raise SummaryError("The summary model ran out of room before finishing the notes.")
+    return _extract_json(content)
+
+
+def summarize(segments: list[dict]) -> dict:
+    """Turn transcript segments into structured session notes (see the top of this file)."""
+    if not is_configured():
+        raise SummaryError("Summaries aren't set up on the server (LLM_BASE_URL / LLM_API_KEY missing).")
+    if not segments:
+        raise SummaryError("There's no speech to summarize.")
+
+    started = time.monotonic()
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            raw = _ask_model(segments)
+            break
+        except SummaryError as exc:
+            # Only a cut-off or malformed reply is worth retrying; connection and
+            # server errors are reported straight away.
+            retryable = "ran out of room" in str(exc) or "expected format" in str(exc)
+            if attempt == ATTEMPTS or not retryable:
+                raise
+            log.info("Summary attempt %d failed (%s); retrying", attempt, exc)
+
     notes = {
         "overview": str(raw.get("overview") or "").strip(),
         "sections": [{"title": s["title"], "items": _clean_items(raw.get(s["key"]))} for s in SECTIONS],

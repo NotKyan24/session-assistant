@@ -2,7 +2,7 @@
  * SESSION ROW: one past session in the Past sessions list.
  *
  * Shows the session name and a status label (Ready, Processing, Failed),
- * then the date and time, in person/video and the recording length (or which
+ * then the date and time and the recording length (or which
  * stage failed), then who took part.
  */
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -39,7 +39,6 @@ export function SessionRow({ session, onPress }: Props) {
 
   const details = [
     formatSessionDate(session.created_at),
-    session.mode === "video" ? "Video" : "In person",
     status === "failed"
       ? `${STAGE_LABELS[session.failed_stage ?? ""] ?? "Processing"} failed`
       : session.length_seconds

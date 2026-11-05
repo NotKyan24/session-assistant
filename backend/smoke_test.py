@@ -16,7 +16,8 @@ Checks:
 3. The real flow: create → upload → poll every 3 s until ready → fetch the
    transcript and the summary (if the summary model was reachable).
 4. Participation metrics: percentages add up to 100, speakers match the transcript.
-5. Speaker naming: name a speaker, reject an outsider, clear it again.
+5. Speaker naming: name a speaker, reject an outsider, clear it again; fix
+   one line's speaker, see it counted, undo it.
 6. Roster: add a test person, reject a duplicate, remove them.
 7. Past sessions: test sessions are hidden from the list unless asked for.
 
@@ -93,7 +94,7 @@ def new_session(base: str, consent_all: bool = True) -> tuple[int, dict]:
     participants = [{**p, "consented": consent_all or i == 0} for i, p in enumerate(PARTICIPANTS)]
     return post_json(
         f"{base}/api/sessions",
-        {"name": "Smoke test", "mode": "in_person", "participants": participants, "test": True},
+        {"name": "Smoke test", "participants": participants, "test": True},
     )
 
 
@@ -182,6 +183,15 @@ def main() -> None:
     check("naming a non-participant is rejected", status == 400)
     status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {first: None})
     check("speaker name cleared", status == 200 and first not in body["speaker_map"])
+
+    status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/lines/0", {"participant_id": "youth-001"})
+    check("line fixed", status == 200 and body["line_speakers"].get("0") == "youth-001")
+    _, m = call("GET", f"{base}/api/sessions/{session_id}/metrics")
+    check("fixed line counts for that person", any(sp["speaker"] == "youth-001" for sp in m["metrics"]["speakers"]))
+    status, _ = send_json("PUT", f"{base}/api/sessions/{session_id}/lines/99999", {"participant_id": "youth-001"})
+    check("fixing a line that doesn't exist is rejected", status == 404)
+    status, body = send_json("PUT", f"{base}/api/sessions/{session_id}/lines/0", {"participant_id": None})
+    check("line fix undone", status == 200 and "0" not in body["line_speakers"])
 
     test_id = "smoke-test-person"
     call("DELETE", f"{base}/api/roster/{test_id}")  # Leftover from an interrupted run, if any.

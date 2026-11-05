@@ -38,7 +38,11 @@ export default function SessionResultsLayout() {
             <TabButton>Transcript</TabButton>
           </TabTrigger>
         </TabList>
-        <TabSlot />
+        {/* The slot must fill the space left under the tab bar (flex: 1, and allowed
+            to shrink below its content with minHeight: 0). Otherwise each page grows
+            to its full content height, can't scroll, and the bottom is cut off:
+            the transcript showed only its first 10 lines. */}
+        <TabSlot style={styles.slot} />
       </Tabs>
       {/* dismissTo("/") closes every screen back to Setup, for a fresh start. */}
       <View style={[styles.footer, { borderColor: colors.border, backgroundColor: colors.background }]}>
@@ -49,8 +53,13 @@ export default function SessionResultsLayout() {
 }
 
 const styles = StyleSheet.create({
+  slot: {
+    flex: 1,
+    minHeight: 0,
+  },
   tabs: {
     flex: 1,
+    minHeight: 0,
   },
   tabList: {
     flexDirection: "row",

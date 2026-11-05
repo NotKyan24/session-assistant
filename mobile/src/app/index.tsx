@@ -4,13 +4,13 @@
  * This is the app's home screen ("/"). Before anything is recorded, the
  * facilitator:
  * 1. Names the session (pre-filled from today's date, editable).
- * 2. Picks in person or video.
- * 3. Picks who's here today from the shared roster (loaded from the backend).
+ * 2. In the one Participants list (the shared roster, loaded from the backend),
+ *    marks who's here today, then ticks "Consents" on each of their rows.
  *    People can be added to or removed from the roster here too.
- * 4. Checks a consent box for every person in today's session.
  *
- * Every session starts fresh: once Start succeeds, the screen clears who was
- * chosen and their consent, so it's never carried over to the next session.
+ * Consent is never carried over: once Start succeeds, every consent tick is
+ * cleared, so it must be given again for the next session. (Who's here stays
+ * marked, since it's often the same group.)
  *
  * Consent rule: **Start** stays disabled until at least one person is in the
  * session and every one of them has consented, and a note names who's still
@@ -26,23 +26,15 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import { AddPersonForm } from "@/components/add-person-form";
 import { Button } from "@/components/button";
-import { ConsentRow } from "@/components/consent-row";
 import { RosterRow } from "@/components/roster-row";
-import { api, isMock, type Person, type SessionMode } from "@/lib/api";
+import { api, isMock, type Person } from "@/lib/api";
 import { defaultSessionName } from "@/lib/format";
 import { useColors } from "@/lib/theme";
-
-// The two options for the "Where" toggle. `key` is what's sent to the backend.
-const MODES: { key: SessionMode; label: string }[] = [
-  { key: "in_person", label: "In person" },
-  { key: "video", label: "Video" },
-];
 
 export default function SetupScreen() {
   const colors = useColors();
   // Screen state. React re-draws the screen whenever one of these changes.
   const [name, setName] = useState(defaultSessionName);
-  const [mode, setMode] = useState<SessionMode>("in_person");
   // The shared roster; null while it loads.
   const [roster, setRoster] = useState<Person[] | null>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
@@ -95,16 +87,13 @@ export default function SetupScreen() {
     try {
       const { id } = await api.createSession({
         name: name.trim(),
-        mode,
         participants: inSession.map((p) => ({ ...p, consented: !!consent[p.id] })),
       });
       router.push({ pathname: "/record", params: { id } });
       // This screen stays loaded underneath the session. Clear it now, so the
       // next session starts fresh: consent must be given again every time.
       setConsent({});
-      setIncluded({});
       setName(defaultSessionName());
-      setMode("in_person");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the session.");
     } finally {
@@ -139,20 +128,10 @@ export default function SetupScreen() {
         returnKeyType="done"
       />
 
-      <Text style={[styles.heading, { color: colors.muted }]}>Where</Text>
-      <View style={styles.modeRow}>
-        {MODES.map((m) => (
-          <Button
-            key={m.key}
-            title={m.label}
-            variant={mode === m.key ? "primary" : "secondary"}
-            onPress={() => setMode(m.key)}
-            style={styles.modeButton}
-          />
-        ))}
-      </View>
-
-      <Text style={[styles.heading, { color: colors.muted }]}>{"Who's here today"}</Text>
+      <Text style={[styles.heading, { color: colors.muted }]}>Participants</Text>
+      <Text style={[styles.hint, { color: colors.muted }]}>
+        {"Tap who's here today, then tick Consents for each of them. Mark only people who will speak: the app looks for exactly that many voices."}
+      </Text>
       {roster === null && !rosterError && <ActivityIndicator />}
       {rosterError && <Text style={[styles.note, { color: colors.danger }]}>{rosterError}</Text>}
       {roster && (
@@ -165,7 +144,9 @@ export default function SetupScreen() {
               key={p.id}
               person={p}
               included={!!included[p.id]}
+              consented={!!consent[p.id]}
               onToggle={() => toggleIncluded(p.id)}
+              onToggleConsent={() => setConsent((c) => ({ ...c, [p.id]: !c[p.id] }))}
               onRemove={() => removePerson(p.id)}
             />
           ))}
@@ -178,27 +159,14 @@ export default function SetupScreen() {
           <Button title="+ Add participant" variant="secondary" onPress={() => setAdding(true)} />
         ))}
 
-      <Text style={[styles.heading, { color: colors.muted }]}>Consent</Text>
-      {inSession.length === 0 ? (
-        <Text style={[styles.note, { color: colors.muted }]}>{"Choose who's here today, above."}</Text>
-      ) : (
-        <>
-          <View>
-            {inSession.map((p) => (
-              <ConsentRow
-                key={p.id}
-                label={p.label}
-                checked={!!consent[p.id]}
-                onToggle={() => setConsent((c) => ({ ...c, [p.id]: !c[p.id] }))}
-              />
-            ))}
-          </View>
-          <Text style={[styles.note, { color: missing.length ? colors.muted : colors.success }]}>
-            {missing.length
+      {roster && (
+        <Text style={[styles.note, { color: inSession.length && !missing.length ? colors.success : colors.muted }]}>
+          {inSession.length === 0
+            ? "Nobody is marked as here yet."
+            : missing.length
               ? `Waiting on consent from: ${missing.map((p) => p.label).join(", ")}`
-              : "Everyone has consented."}
-          </Text>
-        </>
+              : `Everyone here has consented (${inSession.length}).`}
+        </Text>
       )}
 
       {error && <Text style={[styles.note, { color: colors.danger }]}>{error}</Text>}
@@ -231,12 +199,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
   },
-  modeRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  modeButton: {
-    flex: 1,
+  hint: {
+    fontSize: 14,
+    marginTop: -6,
   },
   note: {
     fontSize: 15,

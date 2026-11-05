@@ -9,14 +9,17 @@
  * Each segment (a stretch of speech by one person) shows as
  *   [mm:ss] Name: what they said
  * with one color per speaker. Unnamed voices show as "Speaker 1", "Speaker 2".
+ * Tapping a line lets staff fix who said it (TranscriptLine), for when the
+ * speaker model got that line wrong.
  *
  * Privacy: the transcript is only shown on screen. It is never logged or saved
  * on the phone.
  */
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, FlatList, StyleSheet, Text } from "react-native";
 
 import { SpeakerNamer } from "@/components/speaker-namer";
-import { formatClock } from "@/lib/format";
+import { TranscriptLine } from "@/components/transcript-line";
 import { useSessionResults } from "@/lib/session-results";
 import { useColors } from "@/lib/theme";
 
@@ -24,6 +27,8 @@ export default function TranscriptPage() {
   const colors = useColors();
   const r = useSessionResults();
   const participants = r.session?.participants ?? [];
+  // The one line whose "Who said this?" picker is open, if any.
+  const [openLine, setOpenLine] = useState<number | null>(null);
 
   if (r.error) {
     return <Text style={[styles.container, styles.text, { color: colors.danger }]}>{r.error}</Text>;
@@ -51,15 +56,27 @@ export default function TranscriptPage() {
         ) : null
       }
       ListEmptyComponent={<Text style={[styles.text, { color: colors.muted }]}>No speech was found in this recording.</Text>}
-      renderItem={({ item }) => (
-        <View style={styles.segment}>
-          <Text style={[styles.time, { color: colors.muted }]}>[{formatClock(item.start)}]</Text>
-          <Text style={[styles.text, { color: colors.text }]}>
-            <Text style={[styles.speaker, { color: r.colorFor(item.speaker) }]}>{r.displayName(item.speaker)}: </Text>
-            {item.text.trim()}
-          </Text>
-        </View>
-      )}
+      extraData={[openLine, r.lineSpeakers, r.speakerMap]}
+      renderItem={({ item, index }) => {
+        const person = r.personOf(index);
+        return (
+          <TranscriptLine
+            start={item.start}
+            text={item.text.trim()}
+            name={r.displayName(person)}
+            color={r.colorFor(person)}
+            fixed={String(index) in r.lineSpeakers}
+            currentId={participants.some((p) => p.id === person) ? person : null}
+            participants={participants}
+            open={openLine === index}
+            onToggle={() => setOpenLine(openLine === index ? null : index)}
+            onPick={(participantId) => {
+              r.fixLine(index, participantId);
+              setOpenLine(null);
+            }}
+          />
+        );
+      }}
     />
   );
 }
@@ -68,26 +85,14 @@ const styles = StyleSheet.create({
   container: {
     padding: 16,
     paddingTop: 0,
-    gap: 14,
+    gap: 10,
   },
   loading: {
     marginTop: 48,
-  },
-  segment: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  time: {
-    fontSize: 14,
-    fontVariant: ["tabular-nums"],
-    paddingTop: 2,
   },
   text: {
     flex: 1,
     fontSize: 16,
     lineHeight: 22,
-  },
-  speaker: {
-    fontWeight: "700",
   },
 });

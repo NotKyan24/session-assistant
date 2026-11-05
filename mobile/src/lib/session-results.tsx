@@ -8,9 +8,14 @@
  * participation numbers), so switching tabs is instant. Pages read it with
  * useSessionResults().
  *
- * It also owns speaker naming: nameSpeaker() saves a choice to the backend,
- * and every page shows the new name straight away through displayName() (for
- * "SPEAKER_00" labels) and rename() (for "Speaker 1" in AI-written text).
+ * It also owns speaker naming and line fixes:
+ * - nameSpeaker() saves which participant a voice ("SPEAKER_00") is.
+ * - fixLine() saves who really said one line, overriding its voice.
+ * Every page shows the result straight away: personOf(i) gives each line's
+ * person (line fix, then named voice, then the voice label), displayName()
+ * and colorFor() work for both participant ids and voice labels, and rename()
+ * swaps "Speaker 1" in AI-written text. Participation numbers are reloaded
+ * after each change, since the backend counts them per person.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
@@ -36,7 +41,13 @@ type SessionResults = {
   speakerMap: Record<string, string>;
   nameSpeaker: (speaker: string, participantId: string | null) => Promise<void>;
   namingError: string | null;
-  /** "SPEAKER_00" -> the assigned participant's name, or "Speaker 1". */
+  /** Staff fixes for single lines: line number (as text) -> participant id. */
+  lineSpeakers: Record<string, string>;
+  /** Fix who said line `index`; null puts it back to automatic. */
+  fixLine: (index: number, participantId: string | null) => Promise<void>;
+  /** Who line `index` is credited to: a participant id, or a voice label if unnamed. */
+  personOf: (index: number) => string;
+  /** A participant id or voice label -> a name ("Kyan", or "Speaker 1" if unnamed). */
   displayName: (speaker: string) => string;
   /** Swaps "Speaker 1" etc. in AI-written text for assigned names. */
   rename: (text: string) => string;
@@ -57,6 +68,7 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
   const [error, setError] = useState<string | null>(null);
   const [speakerMap, setSpeakerMap] = useState<Record<string, string>>({});
   const [namingError, setNamingError] = useState<string | null>(null);
+  const [lineSpeakers, setLineSpeakers] = useState<Record<string, string>>({});
 
   // Load everything once, side by side. Notes, metrics and names are optional:
   // if one fails, the others still show.
@@ -73,17 +85,34 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
       (s) => {
         setSession(s);
         setSpeakerMap(s.speaker_map ?? {});
+        setLineSpeakers(s.line_speakers ?? {});
       },
       () => setSession(null),
     );
   }, [id]);
 
+  // Participation is counted per person on the backend, so reload it after any change.
+  function refreshMetrics() {
+    api.getMetrics(id).then(setMetrics, () => {});
+  }
+
   async function nameSpeaker(speaker: string, participantId: string | null) {
     setNamingError(null);
     try {
       setSpeakerMap(await api.setSpeakers(id, { [speaker]: participantId }));
+      refreshMetrics();
     } catch (e) {
       setNamingError(e instanceof Error ? e.message : "Could not save that name.");
+    }
+  }
+
+  async function fixLine(index: number, participantId: string | null) {
+    setNamingError(null);
+    try {
+      setLineSpeakers(await api.setLineSpeaker(id, index, participantId));
+      refreshMetrics();
+    } catch (e) {
+      setNamingError(e instanceof Error ? e.message : "Could not save that change.");
     }
   }
 
@@ -96,6 +125,22 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
 
   // Each speaker's color: the first speaker heard gets the first color, and so on.
   const speakers = [...new Set(segments?.map((s) => s.speaker) ?? [])];
+  const voices = speakers.filter((s) => s !== "Unknown");
+  const participants = session?.participants ?? [];
+  const participantById = (key: string) => participants.find((p) => p.id === key);
+
+  const voiceColor = (label: string) =>
+    label === "Unknown" ? UNKNOWN_COLOR : SPEAKER_COLORS[Math.max(0, voices.indexOf(label)) % SPEAKER_COLORS.length];
+
+  // A participant uses the color of the voice they were named as, so their lines
+  // match "Who's speaking?". Someone only reached through line fixes gets a color
+  // after the voices' colors.
+  const personColor = (key: string) => {
+    if (!participantById(key)) return voiceColor(key);
+    const voice = voices.find((v) => speakerMap[v] === key);
+    if (voice) return voiceColor(voice);
+    return SPEAKER_COLORS[(voices.length + participants.findIndex((p) => p.id === key)) % SPEAKER_COLORS.length];
+  };
 
   const value: SessionResults = {
     id,
@@ -110,13 +155,16 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
     speakerMap,
     nameSpeaker,
     namingError,
-    displayName: (speaker) => names[speaker] ?? speakerName(speaker),
+    lineSpeakers,
+    fixLine,
+    personOf: (index) => {
+      const label = segments?.[index]?.speaker ?? "Unknown";
+      return lineSpeakers[String(index)] ?? speakerMap[label] ?? label;
+    },
+    displayName: (key) => participantById(key)?.label ?? names[key] ?? speakerName(key),
     rename: speakerRenamer(names),
     // Unattributed speech is grey; everyone else gets their own color.
-    colorFor: (speaker) =>
-      speaker === "Unknown"
-        ? UNKNOWN_COLOR
-        : SPEAKER_COLORS[Math.max(0, speakers.filter((s) => s !== "Unknown").indexOf(speaker)) % SPEAKER_COLORS.length],
+    colorFor: personColor,
   };
 
   return <Context.Provider value={value}>{children}</Context.Provider>;

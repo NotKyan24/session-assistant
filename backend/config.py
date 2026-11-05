@@ -52,7 +52,9 @@ HF_TOKEN = os.getenv("HF_TOKEN") or None
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "m3-ult-qwen3.6-35b-a3b-ud-q6kl-mtp2-262k")
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4000"))
+# Includes the model's "thinking", which can run to several thousand tokens on
+# long sessions; 4,000 was too low (notes got cut off). The model reads 262k.
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "16000"))
 # Long sessions mean long transcripts (3 hours ≈ 40k tokens), so allow up to 15 minutes.
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "900"))
 
