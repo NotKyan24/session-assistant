@@ -20,7 +20,9 @@ Checks:
    one line's speaker, see it counted, undo it.
 6. Roster: add a test person, reject a duplicate, remove them.
 7. Past sessions: test sessions are hidden from the list unless asked for.
-8. Delete: refused while processing, rejects an unknown reason, then removes
+8. Remove one person: refused until every voice is named; then their lines
+   are emptied, the audio is deleted, the notes rewritten without them.
+9. Delete: refused while processing, rejects an unknown reason, then removes
    both test sessions and their audio, transcript and notes.
 
 Prints statuses, timings, speaker and section counts. It never prints
@@ -221,6 +223,47 @@ def main() -> None:
         listed is not None and listed["hidden"] and listed["length_seconds"] and listed["has_summary"] is not None,
         f"{listed['length_seconds'] if listed else '?'} s",
     )
+
+    withdraw = f"{base}/api/sessions/{session_id}/participants/youth-001/withdraw"
+    status, _ = call("POST", withdraw)
+    check("withdraw: refused until every voice is named", status == 409)
+    voices = [sp for sp in speakers if sp != "Unknown"]
+    names = {sp: ("facilitator" if i == 0 else "youth-001") for i, sp in enumerate(voices)}
+    send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", names)
+    status, body = call("POST", withdraw)
+    check(
+        "withdraw: accepted",
+        status == 200 and body["removed_lines"] > 0 and body["audio_deleted"],
+        f"{body.get('removed_lines')} lines removed",
+    )
+    while True:
+        _, session = call("GET", f"{base}/api/sessions/{session_id}")
+        if session["status"] in ("ready", "failed"):
+            break
+        time.sleep(2)
+    check("withdraw: notes rewritten, session ready", session["status"] == "ready", "; ".join(session.get("warnings", [])))
+    _, body = call("GET", f"{base}/api/sessions/{session_id}/transcript")
+    removed = [seg for seg in body["segments"] if seg.get("removed")]
+    left = [seg for seg in body["segments"] if not seg.get("removed")]
+    check(
+        "withdraw: their lines are empty, everyone else's remain",
+        removed and all(seg["text"] == "" for seg in removed) and all(names.get(seg["speaker"]) == "facilitator" for seg in left),
+        f"{len(removed)} removed, {len(left)} kept",
+    )
+    _, m = call("GET", f"{base}/api/sessions/{session_id}/metrics")
+    check("withdraw: not in participation", all(sp["speaker"] != "youth-001" for sp in m["metrics"]["speakers"]))
+    person = next(p for p in session["participants"] if p["id"] == "youth-001")
+    check("withdraw: name replaced by id, time kept", person["label"] == "youth-001" and person.get("withdrawn_at"))
+    if "localhost" in base or "127.0.0.1" in base:
+        audio_dir = Path(__file__).parent / "../data/audio"
+        check("withdraw: audio deleted", not any(audio_dir.glob(f"{session_id}.*")))
+    status, _ = call("POST", withdraw)
+    check("withdraw: second time refused", status == 409)
+    status, _ = send_json("PUT", f"{base}/api/sessions/{session_id}/speakers", {voices[-1]: "youth-001"})
+    check("withdraw: can't be named again", status == 400)
+    first_removed = next(i for i, seg in enumerate(body["segments"]) if seg.get("removed"))
+    status, _ = send_json("PUT", f"{base}/api/sessions/{session_id}/lines/{first_removed}", {"participant_id": "facilitator"})
+    check("withdraw: removed lines can't be reassigned", status == 409)
 
     status, _ = call("DELETE", f"{base}/api/sessions/{session_id}?reason=because")
     check("delete: unknown reason rejected", status == 422)

@@ -13,6 +13,7 @@
  *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Transcript page)
  *   setLineSpeaker → PUT  /api/sessions/{id}/lines/{n}  (Transcript page)
  *   deleteSession  → DELETE /api/sessions/{id}         (Results and Status screens)
+ *   withdrawParticipant → POST /api/sessions/{id}/participants/{pid}/withdraw (Results)
  *   getRoster / addPerson / removePerson → /api/roster  (Setup screen)
  *
  * Two implementations share the same shape (the `Api` type):
@@ -70,11 +71,20 @@ export type SessionStatus = {
   // Non-fatal problems, e.g. speakers couldn't be identified.
   warnings?: string[];
   /** Who took part, with consent (a copy kept with the session). */
-  participants?: { id: string; label: string; consented: boolean }[];
+  participants?: Participant[];
   /** Which participant id each speaker label is, e.g. { SPEAKER_00: "facilitator" }. */
   speaker_map?: Record<string, string>;
   /** Staff fixes for single lines: line number (as text) -> participant id. */
   line_speakers?: Record<string, string>;
+};
+
+// Someone in a session. After they withdraw consent, label is just their id.
+export type Participant = {
+  id: string;
+  label: string;
+  consented: boolean;
+  /** Set when they withdrew consent and their lines were removed. */
+  withdrawn_at?: string | null;
 };
 
 // One line of the transcript: who spoke, when (in seconds), and what they said.
@@ -83,6 +93,8 @@ export type Segment = {
   start: number;
   end: number;
   text: string;
+  /** True when the line was removed because its speaker withdrew consent (text is empty). */
+  removed?: boolean;
 };
 
 // Structured session notes written by the summary model (see backend/summarize.py).
@@ -158,6 +170,12 @@ export type Api = {
   setLineSpeaker(id: string, index: number, participantId: string | null): Promise<Record<string, string>>;
   /** Delete a session for good: audio, transcript and notes. Refused while it's processing. */
   deleteSession(id: string, reason: DeleteReason): Promise<void>;
+  /**
+   * One person withdrew consent: their lines are emptied, the recording is
+   * deleted for everyone and the notes are rewritten (the session goes back to
+   * "summarizing"). Every voice must be named first.
+   */
+  withdrawParticipant(id: string, participantId: string): Promise<{ removed_lines: number }>;
   getRoster(): Promise<Person[]>;
   addPerson(person: Person): Promise<Person>;
   removePerson(personId: string): Promise<void>;
@@ -285,6 +303,9 @@ const httpApi: Api = {
   deleteSession: async (id, reason) => {
     await request(`/api/sessions/${id}?reason=${reason}`, { method: "DELETE" });
   },
+
+  withdrawParticipant: (id, participantId) =>
+    request(`/api/sessions/${id}/participants/${encodeURIComponent(participantId)}/withdraw`, { method: "POST" }),
 
   getRoster: async () => (await request<{ people: Person[] }>("/api/roster")).people,
 

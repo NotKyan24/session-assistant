@@ -87,6 +87,17 @@ export function TranscriptLine({ start, text, name, color, fixed, currentId, par
   );
 }
 
+/** A line whose speaker withdrew consent: only its time is kept, nothing about who or what. */
+export function RemovedLine({ start }: { start: number }) {
+  const colors = useColors();
+  return (
+    <View style={styles.segment} accessibilityLabel={`${formatClock(start)}, removed: consent withdrawn`}>
+      <Text style={[styles.time, { color: colors.muted }]}>[{formatClock(start)}]</Text>
+      <Text style={[styles.text, styles.edited, { color: colors.muted }]}>[removed: consent withdrawn]</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   segment: {
     flexDirection: "row",

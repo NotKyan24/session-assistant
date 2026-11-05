@@ -16,10 +16,13 @@
  * and colorFor() work for both participant ids and voice labels, and rename()
  * swaps "Speaker 1" in AI-written text. Participation numbers are reloaded
  * after each change, since the backend counts them per person.
+ *
+ * Lines removed because someone withdrew consent have no text and belong to
+ * no voice; withdrawn people can't be picked for voices or lines.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-import { api, type Metrics, type Segment, type SessionStatus, type Summary } from "./api";
+import { api, type Metrics, type Participant, type Segment, type SessionStatus, type Summary } from "./api";
 import { speakerName, speakerRenamer } from "./format";
 import { SPEAKER_COLORS } from "./theme";
 
@@ -36,8 +39,10 @@ type SessionResults = {
   metricsError: string | null;
   /** A problem loading the transcript; the pages show it instead of content. */
   error: string | null;
-  /** Speaker labels in order of first appearance (includes "Unknown"). */
+  /** Speaker labels in order of first appearance (includes "Unknown"; not removed lines). */
   speakers: string[];
+  /** Participants who haven't withdrawn: the ones voices and lines can be credited to. */
+  activeParticipants: Participant[];
   speakerMap: Record<string, string>;
   nameSpeaker: (speaker: string, participantId: string | null) => Promise<void>;
   namingError: string | null;
@@ -124,7 +129,7 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
   }
 
   // Each speaker's color: the first speaker heard gets the first color, and so on.
-  const speakers = [...new Set(segments?.map((s) => s.speaker) ?? [])];
+  const speakers = [...new Set(segments?.filter((s) => !s.removed).map((s) => s.speaker) ?? [])];
   const voices = speakers.filter((s) => s !== "Unknown");
   const participants = session?.participants ?? [];
   const participantById = (key: string) => participants.find((p) => p.id === key);
@@ -152,6 +157,7 @@ export function SessionResultsProvider({ id, children }: { id: string; children:
     metricsError,
     error,
     speakers,
+    activeParticipants: participants.filter((p) => !p.withdrawn_at),
     speakerMap,
     nameSpeaker,
     namingError,

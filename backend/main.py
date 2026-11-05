@@ -21,6 +21,9 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     GET  /api/sessions/{id}/metrics       participation numbers, once "ready"
     PUT  /api/sessions/{id}/speakers      say which participant each speaker is
     PUT  /api/sessions/{id}/lines/{n}     fix who said one transcript line
+    POST /api/sessions/{id}/participants/{pid}/withdraw
+                                          remove one person's lines (consent withdrawn),
+                                          delete the audio, rewrite the notes
     DELETE /api/sessions/{id}             delete a session and its audio, transcript
                                           and notes (?reason=consent_withdrawn|other)
     GET  /api/roster                      everyone on the shared roster
@@ -95,7 +98,17 @@ async def lifespan(app: FastAPI):
         log.warning("No API_ACCESS_KEY in .env: only requests from this Mac will be accepted.")
 
     for s in sessions.all_sessions():
-        if s.get("status") in PROCESSING_STAGES:
+        if s.get("status") == "summarizing" and sessions.load_transcript(s["id"]) is not None:
+            # The transcript was already saved; only the notes are missing.
+            sessions.update(
+                s["id"],
+                status="ready",
+                stage="ready",
+                progress=None,
+                warnings=[*s.get("warnings", []), "No summary for this session: the server restarted while writing it."],
+            )
+            log.info("Session %s: marked ready without notes (interrupted by restart)", s["id"])
+        elif s.get("status") in PROCESSING_STAGES:
             sessions.update(
                 s["id"],
                 status="failed",
@@ -204,6 +217,22 @@ def _get_session_or_404(session_id: str) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
     return session
+
+
+# A transcript line removed because its speaker withdrew consent: its text is
+# gone, and it's left out of participation numbers and notes. The line keeps its
+# place (and times) so line numbers, which line fixes use, don't shift.
+REMOVED_SPEAKER = "Removed"
+
+
+def _kept(segments: list[dict]) -> list[dict]:
+    """The transcript without removed lines."""
+    return [seg for seg in segments if not seg.get("removed")]
+
+
+def _active_ids(session: dict) -> set[str]:
+    """Participants who haven't withdrawn: the only ones lines and voices can be credited to."""
+    return {p["id"] for p in session["participants"] if not p.get("withdrawn_at")}
 
 
 def _estimate_seconds_left(session: dict) -> int | None:
@@ -489,8 +518,8 @@ def set_speakers(session_id: str, body: dict[str, str | None]) -> dict:
     session = _get_session_or_404(session_id)
     if session["status"] != "ready":
         raise HTTPException(status_code=409, detail="Speakers can be named once the transcript is ready.")
-    speakers = {s["speaker"] for s in sessions.load_transcript(session_id) or []}
-    participant_ids = {p["id"] for p in session["participants"]}
+    speakers = {s["speaker"] for s in _kept(sessions.load_transcript(session_id) or [])}
+    participant_ids = _active_ids(session)
     speaker_map = dict(session.get("speaker_map", {}))
     for speaker, person_id in body.items():
         if speaker not in speakers:
@@ -540,7 +569,7 @@ def get_metrics(session_id: str) -> dict:
     segments = sessions.load_transcript(session_id)
     if segments is None:
         raise HTTPException(status_code=500, detail="The transcript file is missing.")
-    return {"metrics": metrics.participation(_by_person(session, segments))}
+    return {"metrics": metrics.participation(_kept(_by_person(session, segments)))}
 
 
 def _by_person(session: dict, segments: list[dict]) -> list[dict]:
@@ -579,10 +608,12 @@ def set_line_speaker(session_id: str, index: int, body: LineSpeakerIn) -> dict:
     segments = sessions.load_transcript(session_id) or []
     if not 0 <= index < len(segments):
         raise HTTPException(status_code=404, detail="There's no such line in this transcript.")
+    if segments[index].get("removed"):
+        raise HTTPException(status_code=409, detail="This line was removed (consent withdrawn).")
     fixes = dict(session.get("line_speakers", {}))
     if body.participant_id is None:
         fixes.pop(str(index), None)
-    elif body.participant_id not in {p["id"] for p in session["participants"]}:
+    elif body.participant_id not in _active_ids(session):
         raise HTTPException(status_code=400, detail=f"{body.participant_id} isn't a participant in this session.")
     else:
         fixes[str(index)] = body.participant_id
@@ -675,3 +706,132 @@ def delete_session(session_id: str, reason: sessions.DeleteReason = "other") -> 
     log.info("Session %s: deleted (%d files, reason %s)", session_id, removed, reason)
     return {"deleted": session_id}
 
+
+
+def _resummarize(session_id: str) -> None:
+    """Background job after a withdrawal: write the notes again from the lines that are left.
+
+    The old notes were deleted before this was queued (they contained the
+    withdrawn person's words). If summarizing fails, the session is still
+    ready, with a warning, like after a first transcription.
+    """
+    started = time.monotonic()
+    warning = None
+    try:
+        kept = _kept(sessions.load_transcript(session_id) or [])
+        if kept:
+            sessions.save_summary(session_id, summarizer.summarize(kept))
+    except summarizer.SummaryError as exc:
+        warning = f"No summary after removing a participant: {exc}"
+        log.info("Session %s: summary after withdrawal skipped (%s)", session_id, exc)
+    except Exception:  # noqa: BLE001
+        warning = "No summary after removing a participant: something went wrong on the server."
+        log.exception("Session %s: unexpected error re-summarizing", session_id)
+    try:
+        session = sessions.load(session_id)
+        if session is None:
+            return  # Deleted meanwhile (delete is refused while summarizing, but be safe).
+        warnings = session.get("warnings", []) + ([warning] if warning else [])
+        sessions.update(session_id, status="ready", stage="ready", progress=None, warnings=warnings)
+    except KeyError:
+        return
+    log.info("Session %s: notes rewritten after withdrawal in %.1fs", session_id, time.monotonic() - started)
+
+
+@app.post("/api/sessions/{session_id}/participants/{participant_id}/withdraw", dependencies=protected)
+def withdraw_participant(session_id: str, participant_id: str) -> dict:
+    """One person withdrew consent: remove what they said, keep the rest of the session.
+
+    1. Every voice must be named first (on the Transcript tab); otherwise there's
+       no way to know which lines are theirs. 409 if any isn't.
+    2. Their lines, plus any line still marked Unknown (it could be theirs), are
+       replaced with an empty "removed" line. Line fixes and voice names
+       pointing at them are dropped.
+    3. The recording is deleted for everyone: one voice can't be cut out of it.
+    4. The old notes are deleted now, and new ones are written from the lines
+       that are left (status "summarizing", then "ready"; the app polls).
+    5. Their display name is replaced by their id, the withdrawal time is kept,
+       and data/deletions.json gets the session id, participant id and date.
+
+    What other people said about them stays; staff should check the transcript.
+    """
+    session = _get_session_or_404(session_id)
+    if session["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Someone can be removed once the session is ready.")
+    person = next((p for p in session["participants"] if p["id"] == participant_id), None)
+    if person is None:
+        raise HTTPException(status_code=404, detail=f"{participant_id} isn't a participant in this session.")
+    if person.get("withdrawn_at"):
+        raise HTTPException(status_code=409, detail=f"{participant_id} was already removed from this session.")
+
+    segments = sessions.load_transcript(session_id)
+    if segments is None:
+        raise HTTPException(status_code=500, detail="The transcript file is missing.")
+    speaker_map = dict(session.get("speaker_map", {}))
+    fixes = dict(session.get("line_speakers", {}))
+
+    # A voice is unnamed if it still has lines of its own (not removed, not fixed to someone).
+    unnamed = {
+        seg["speaker"]
+        for i, seg in enumerate(segments)
+        if not seg.get("removed")
+        and str(i) not in fixes
+        and seg["speaker"] != engine.UNKNOWN_SPEAKER
+        and seg["speaker"] not in speaker_map
+    }
+    if unnamed:
+        raise HTTPException(
+            status_code=409,
+            detail="Name every voice on the Transcript tab first, so it's clear which lines are theirs.",
+        )
+
+    credited = _by_person(session, segments)
+    to_remove = {
+        i
+        for i, seg in enumerate(credited)
+        if not seg.get("removed") and seg["speaker"] in (participant_id, engine.UNKNOWN_SPEAKER)
+    }
+    redacted = [
+        {"speaker": REMOVED_SPEAKER, "start": seg["start"], "end": seg["end"], "text": "", "removed": True}
+        if i in to_remove
+        else seg
+        for i, seg in enumerate(segments)
+    ]
+
+    # Order matters: the words go first (transcript, then the notes made from
+    # them), then the audio, then the session record.
+    sessions.save_transcript(session_id, redacted)
+    sessions.delete_summary(session_id)
+    audio_files = sessions.delete_audio(session_id)
+    now = sessions.now_iso()
+    participants = [
+        {**p, "label": p["id"], "withdrawn_at": now} if p["id"] == participant_id else p for p in session["participants"]
+    ]
+    sessions.update(
+        session_id,
+        participants=participants,
+        speaker_map={k: v for k, v in speaker_map.items() if v != participant_id},
+        line_speakers={k: v for k, v in fixes.items() if v != participant_id and int(k) not in to_remove},
+        audio_file=None,
+        audio_deleted_at=now,
+        status="summarizing",
+        stage="summarizing",
+        progress=None,
+        stage_started_at=time.time(),
+    )
+    if not session.get("test"):
+        sessions.record_deletion(
+            {
+                "id": session_id,
+                "participant_id": participant_id,
+                "created_at": session.get("created_at"),
+                "deleted_at": now,
+                "reason": "consent_withdrawn",
+            }
+        )
+    worker.submit(_resummarize, session_id)
+    log.info(
+        "Session %s: participant withdrawn (%d lines removed, %d audio files deleted)",
+        session_id, len(to_remove), audio_files,
+    )
+    return {"removed_lines": len(to_remove), "audio_deleted": audio_files > 0}

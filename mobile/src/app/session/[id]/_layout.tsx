@@ -5,7 +5,8 @@
  *   Notes          the AI session notes
  *   Participation  how much each person took part, plus AI engagement notes
  *   Transcript     "Who's speaking?" (name each voice), then the transcript lines
- * Below them: "New session" and "Delete session" (see delete-session.tsx).
+ * Below them: "New session" and "Delete…" (one person's part, or the whole
+ * session; see delete-session.tsx).
  * Routes: /session/<id>/notes, /session/<id>/participation, /session/<id>/transcript.
  *
  * Uses Expo Router's custom tabs (expo-router/ui), which let the tab bar sit
@@ -19,7 +20,7 @@ import { StyleSheet, View } from "react-native";
 import { Button } from "@/components/button";
 import { DeleteSession } from "@/components/delete-session";
 import { TabButton } from "@/components/tab-button";
-import { SessionResultsProvider } from "@/lib/session-results";
+import { SessionResultsProvider, useSessionResults } from "@/lib/session-results";
 import { useColors } from "@/lib/theme";
 
 export default function SessionResultsLayout() {
@@ -46,13 +47,21 @@ export default function SessionResultsLayout() {
             the transcript showed only its first 10 lines. */}
         <TabSlot style={styles.slot} />
       </Tabs>
-      {/* dismissTo("/") closes every screen back to Setup, for a fresh start.
-          Delete session (e.g. consent withdrawn) asks for a reason first. */}
-      <View style={[styles.footer, { borderColor: colors.border, backgroundColor: colors.background }]}>
-        <Button title="New session" variant="secondary" onPress={() => router.dismissTo("/")} style={styles.grow} />
-        <DeleteSession id={id} />
-      </View>
+      <Footer id={id} />
     </SessionResultsProvider>
+  );
+}
+
+// Inside the provider, so Delete… can offer to remove one person from the session.
+function Footer({ id }: { id: string }) {
+  const colors = useColors();
+  const { activeParticipants } = useSessionResults();
+  return (
+    <View style={[styles.footer, { borderColor: colors.border, backgroundColor: colors.background }]}>
+      {/* dismissTo("/") closes every screen back to Setup, for a fresh start. */}
+      <Button title="New session" variant="secondary" onPress={() => router.dismissTo("/")} style={styles.grow} />
+      <DeleteSession id={id} participants={activeParticipants} />
+    </View>
   );
 }
 

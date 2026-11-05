@@ -296,6 +296,11 @@ export const mockApi: Api = {
     sessions.delete(id);
   },
 
+  async withdrawParticipant() {
+    // Redacting lines and rewriting notes only happens on the real backend.
+    throw new Error("Removing one person needs the real server (demo mode can't do it).");
+  },
+
   async removePerson(personId) {
     roster = roster.filter((p) => p.id !== personId);
   },

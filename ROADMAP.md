@@ -11,7 +11,7 @@ What comes after the Day 1 end-to-end path, in the order we plan to work on it. 
 | 1 | Speaker naming | ✅ Done (Oct 21) |
 | 2 | Shared participant roster | ✅ Done (Oct 21) |
 | 3 | Participation metrics and risk notes in summaries | ✅ Participation done (Oct 22); risk notes need Joe's input |
-| 4 | Session history | ✅ Past sessions screen done (Oct 22); retention, delete and export wait on Joe |
+| 4 | Session history | ✅ Past sessions (Oct 22); delete and consent withdrawal (Nov 5); retention and export wait on Joe |
 | 5 | Hawaiian words and names | Planned; needs a starter glossary |
 | 6 | In person vs. video | ✅ Removed (Nov 2) |
 | 7 | Team testing, then real use | Deferred until the planned features are done (decided Nov 2) |
@@ -80,6 +80,18 @@ Removed on Nov 2: the toggle never changed anything, so Setup now has just the s
 
 No real counseling recordings go through the system until then.
 
+## Consent withdrawal (Nov 5)
+
+On a finished session, **Delete…** offers two options:
+- **One person's part:** their transcript lines become "[removed: consent withdrawn]", the **recording is deleted for everyone** (one voice can't be cut out of a mixed recording), and the notes are written again from the remaining lines. Every voice must be named first, so it's clear which lines are theirs; lines still marked Unknown are removed too, since they could be theirs. Their name is replaced by their ID.
+- **The whole session:** the recording, transcript and notes are deleted for everyone.
+
+`data/deletions.json` keeps a content-free record (session ID, participant ID if one person, dates, reason) to show the withdrawal was honored. After an upload succeeds, the phone deletes its own copy of the recording.
+
+Limits staff should know: what other people said *about* the person stays in the transcript; lines the speaker model credited to someone else stay unless they were fixed first. Deleted files may still exist in this Mac's backups (e.g. Time Machine) until those expire.
+
+**For Joe:** if someone disclosed something reportable, deleting it may conflict with mandated-reporting or record-keeping duties. Who may delete, and is there a review step?
+
 ## Speaker accuracy (Nov 2)
 
 With many people (11 in a 10-minute test), similar voices got merged: "at most 11" found 10 speakers, one with 19% of the talk. Now:
@@ -101,5 +113,5 @@ Still open: re-identify speakers on an existing session without re-uploading; pe
 - **Hosting:** which Purple server (and its `https://` address, login, disk space, backups)? Does Purple have an Apple Developer account and an Expo organization you can be added to? Is it OK for audio to go to that server?
 - **Notes:** are the four headings right (topics, concerns, goals / next steps, follow-ups)?
 - **Risk notes:** which categories, and what's the staff protocol when one is flagged?
-- **Data:** what's kept, for how long, and who can see it? Is export needed?
+- **Data:** what's kept, for how long, and who can see it? Is export needed? Who may delete a session or remove a person, and how does that fit mandated reporting?
 - **David:** is `m3-ult` Purple-owned, and is Cloudflare in the path acceptable for transcripts?

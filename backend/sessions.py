@@ -168,24 +168,41 @@ def delete(session_id: str, reason: DeleteReason, busy_statuses: tuple[str, ...]
 
         # The audio is named after the session id; the glob also catches a file
         # left over from an upload that failed part-way.
+        removed = delete_audio(session_id)
         files = [
-            *config.AUDIO_DIR.glob(f"{session_id}.*"),
             _transcript_path(session_id),
             _summary_path(session_id),
             _session_path(session_id),  # Last: until it's gone, the session still exists.
         ]
-        removed = 0
         for path in files:
             if path.exists():
                 path.unlink()
                 removed += 1
 
         if not session.get("test"):
-            record = {
-                "id": session_id,
-                "created_at": session.get("created_at"),
-                "deleted_at": now_iso(),
-                "reason": reason,
-            }
-            _write_json(DELETIONS_PATH, [*(_read_json(DELETIONS_PATH) or []), record])
+            record_deletion(
+                {"id": session_id, "created_at": session.get("created_at"), "deleted_at": now_iso(), "reason": reason}
+            )
         return removed
+
+
+def record_deletion(record: dict) -> None:
+    """Add one content-free entry (ids, dates, reason) to deletions.json."""
+    with _lock:
+        _write_json(DELETIONS_PATH, [*(_read_json(DELETIONS_PATH) or []), record])
+
+
+def delete_audio(session_id: str) -> int:
+    """Delete a session's recording (and any part-uploaded copy). Returns how many files went."""
+    if not is_valid_id(session_id):
+        return 0
+    removed = 0
+    for path in config.AUDIO_DIR.glob(f"{session_id}.*"):
+        path.unlink()
+        removed += 1
+    return removed
+
+
+def delete_summary(session_id: str) -> None:
+    if is_valid_id(session_id):
+        _summary_path(session_id).unlink(missing_ok=True)
