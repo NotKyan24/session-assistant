@@ -7,6 +7,8 @@ Files, all in data/sessions/ (gitignored):
     <id>.transcript.json  the transcript segments, once ready (kept separate so
                           the status file stays small and is easy to delete)
     <id>.summary.json     the structured session notes, if summarizing worked
+And in data/:
+    deletions.json        a content-free record of deleted sessions (see delete())
 
 Writes go to a temporary file first and then replace the real file in one
 step, so a crash can never leave a half-written session behind. A lock stops
@@ -24,7 +26,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import config
 
@@ -131,3 +133,59 @@ def load_summary(session_id: str) -> dict | None:
     if not is_valid_id(session_id):
         return None
     return _read_json(_summary_path(session_id))
+
+
+# ---------- Deleting ----------
+
+# A content-free record of every deleted session (gitignored, in data/): id,
+# when it was created and deleted, and why. No names, no participants, no
+# transcript. It shows that a consent withdrawal was honored.
+DELETIONS_PATH = config.DATA_DIR / "deletions.json"
+
+DeleteReason = Literal["consent_withdrawn", "other"]
+
+
+class SessionBusy(Exception):
+    """The session is being processed; deleting now would race the background job."""
+
+
+def delete(session_id: str, reason: DeleteReason, busy_statuses: tuple[str, ...]) -> int:
+    """Delete everything stored for a session: audio, transcript, notes, session file.
+
+    Raises KeyError if there's no such session, SessionBusy if its status is in
+    busy_statuses. Real (non-test) deletions are added to deletions.json.
+    Returns how many files were removed. The check and the delete happen under
+    the same lock, so the status can't change in between.
+    """
+    if not is_valid_id(session_id):
+        raise KeyError(session_id)
+    with _lock:
+        session = _read_json(_session_path(session_id))
+        if session is None:
+            raise KeyError(session_id)
+        if session.get("status") in busy_statuses:
+            raise SessionBusy(session_id)
+
+        # The audio is named after the session id; the glob also catches a file
+        # left over from an upload that failed part-way.
+        files = [
+            *config.AUDIO_DIR.glob(f"{session_id}.*"),
+            _transcript_path(session_id),
+            _summary_path(session_id),
+            _session_path(session_id),  # Last: until it's gone, the session still exists.
+        ]
+        removed = 0
+        for path in files:
+            if path.exists():
+                path.unlink()
+                removed += 1
+
+        if not session.get("test"):
+            record = {
+                "id": session_id,
+                "created_at": session.get("created_at"),
+                "deleted_at": now_iso(),
+                "reason": reason,
+            }
+            _write_json(DELETIONS_PATH, [*(_read_json(DELETIONS_PATH) or []), record])
+        return removed

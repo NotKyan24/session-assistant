@@ -2,6 +2,22 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "backend-test",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "CORS_ORIGINS=http://localhost:8082",
+        "backend/.venv/bin/uvicorn",
+        "--app-dir",
+        "backend",
+        "main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8001"
+      ],
+      "port": 8001
+    },
+    {
       "name": "mobile-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": [

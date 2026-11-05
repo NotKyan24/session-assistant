@@ -22,3 +22,11 @@ export async function uploadFile(
   onProgress?.(1);
   return { status: res.status, body: await res.text() };
 }
+
+/**
+ * In the browser, recordings are "blob:" URLs held in memory. Releasing the
+ * URL lets the browser free the recording once it has been uploaded.
+ */
+export function discardLocalCopy(uri: string): void {
+  if (uri.startsWith("blob:")) URL.revokeObjectURL(uri);
+}

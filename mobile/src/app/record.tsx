@@ -40,6 +40,7 @@ import { LevelMeter } from "@/components/level-meter";
 import { api, DuplicateRecordingError, type AudioFile } from "@/lib/api";
 import { formatClock } from "@/lib/format";
 import { useColors } from "@/lib/theme";
+import { discardLocalCopy } from "@/lib/upload";
 
 // Names our keep-awake request, so we release exactly the one we turned on.
 const KEEP_AWAKE_TAG = "recording";
@@ -158,6 +159,9 @@ export default function RecordScreen() {
     setDuplicateOf(null);
     try {
       await api.uploadAudio(id, file, setUploadProgress);
+      // The server has it now: don't leave a copy on the phone. (On failure the
+      // copy stays, so nothing is lost before it reaches the server.)
+      discardLocalCopy(file.uri);
       router.replace({ pathname: "/processing", params: { id } });
     } catch (e) {
       if (e instanceof DuplicateRecordingError) {

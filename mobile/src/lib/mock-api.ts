@@ -289,6 +289,13 @@ export const mockApi: Api = {
     return added;
   },
 
+  async deleteSession(id) {
+    await delay(300);
+    const session = sessions.get(id);
+    if (!session) throw new Error("Session not found.");
+    sessions.delete(id);
+  },
+
   async removePerson(personId) {
     roster = roster.filter((p) => p.id !== personId);
   },

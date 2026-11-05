@@ -10,16 +10,18 @@
  *   - Processing or Failed → the Status screen
  *
  * Test sessions (from the smoke test) and sessions never recorded are hidden
- * unless "Show test and unrecorded sessions" is on. Nothing is deleted.
+ * unless "Show test and unrecorded sessions" is on. Sessions are deleted from
+ * their own screens (Delete session); the list reloads when you come back.
  * Pull down to refresh. "New session" (bottom) goes back to a fresh Setup screen.
  */
-import { router } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Button } from "@/components/button";
 import { SessionRow } from "@/components/session-row";
 import { api, type SessionListItem } from "@/lib/api";
+import { takeSessionsChanged } from "@/lib/sessions-changed";
 import { useColors } from "@/lib/theme";
 
 // Wait this long after the last keystroke before searching.
@@ -59,6 +61,14 @@ export default function PastSessionsScreen() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, includeHidden]);
+
+  // Coming back after a session was deleted: reload, so it's no longer listed.
+  useFocusEffect(
+    useCallback(() => {
+      if (takeSessionsChanged()) load(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query, includeHidden]),
+  );
 
   async function refresh() {
     setRefreshing(true);

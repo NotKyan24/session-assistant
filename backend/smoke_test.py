@@ -20,6 +20,8 @@ Checks:
    one line's speaker, see it counted, undo it.
 6. Roster: add a test person, reject a duplicate, remove them.
 7. Past sessions: test sessions are hidden from the list unless asked for.
+8. Delete: refused while processing, rejects an unknown reason, then removes
+   both test sessions and their audio, transcript and notes.
 
 Prints statuses, timings, speaker and section counts. It never prints
 transcript or summary text.
@@ -127,7 +129,8 @@ def main() -> None:
 
     status, body = new_session(base)
     check("session created", status == 201, f"id {body.get('id')}")
-    status, body = post_file(f"{base}/api/sessions/{body['id']}/audio", "notes.txt", b"not audio", "text/plain")
+    unrecorded_id = body["id"]
+    status, body = post_file(f"{base}/api/sessions/{unrecorded_id}/audio", "notes.txt", b"not audio", "text/plain")
     check("non-audio upload is rejected", status == 415)
 
     status, body = new_session(base)
@@ -137,6 +140,8 @@ def main() -> None:
     content_type = mimetypes.guess_type(audio.name)[0] or "application/octet-stream"
     status, body = post_file(f"{base}/api/sessions/{session_id}/audio", audio.name, audio.read_bytes(), content_type)
     check("audio uploaded", status == 202, f"{audio.stat().st_size / 1e6:.1f} MB")
+    status, _ = call("DELETE", f"{base}/api/sessions/{session_id}")
+    check("delete is refused while processing", status == 409)
 
     started, last_stage = time.monotonic(), None
     while True:
@@ -216,6 +221,21 @@ def main() -> None:
         listed is not None and listed["hidden"] and listed["length_seconds"] and listed["has_summary"] is not None,
         f"{listed['length_seconds'] if listed else '?'} s",
     )
+
+    status, _ = call("DELETE", f"{base}/api/sessions/{session_id}?reason=because")
+    check("delete: unknown reason rejected", status == 422)
+    status, _ = call("DELETE", f"{base}/api/sessions/{session_id}?reason=consent_withdrawn")
+    check("delete: session deleted", status == 200)
+    status, _ = call("GET", f"{base}/api/sessions/{session_id}")
+    gone = [f"{base}/api/sessions/{session_id}/{part}" for part in ("transcript", "summary", "metrics")]
+    check("delete: session and results are gone", status == 404 and all(call("GET", u)[0] == 404 for u in gone))
+    if "localhost" in base or "127.0.0.1" in base:
+        audio_dir = Path(__file__).parent / "../data/audio"
+        check("delete: audio file removed", not any(audio_dir.glob(f"{session_id}.*")))
+    status, _ = call("DELETE", f"{base}/api/sessions/{session_id}")
+    check("delete: deleting again says not found", status == 404)
+    status, _ = call("DELETE", f"{base}/api/sessions/{unrecorded_id}")
+    check("delete: unrecorded session deleted", status == 200)
 
 
 if __name__ == "__main__":

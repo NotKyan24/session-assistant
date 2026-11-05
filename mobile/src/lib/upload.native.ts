@@ -35,3 +35,18 @@ export async function uploadFile(
   });
   return { status: result.status, body: result.body };
 }
+
+/**
+ * Delete the phone's copy of a recording once the server has it. Recordings
+ * sit in the app's cache until iOS or Android clears it, so without this a
+ * session deleted on the server could still be on the phone. Never throws:
+ * a copy that's already gone is fine.
+ */
+export function discardLocalCopy(uri: string): void {
+  try {
+    const file = new File(uri);
+    if (file.exists) file.delete();
+  } catch {
+    // Already gone, or not ours to delete (e.g. outside the app's folders).
+  }
+}

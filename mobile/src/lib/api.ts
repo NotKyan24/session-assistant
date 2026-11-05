@@ -12,6 +12,7 @@
  *   getMetrics     → GET  /api/sessions/{id}/metrics    (Participation page)
  *   setSpeakers    → PUT  /api/sessions/{id}/speakers   (Transcript page)
  *   setLineSpeaker → PUT  /api/sessions/{id}/lines/{n}  (Transcript page)
+ *   deleteSession  → DELETE /api/sessions/{id}         (Results and Status screens)
  *   getRoster / addPerson / removePerson → /api/roster  (Setup screen)
  *
  * Two implementations share the same shape (the `Api` type):
@@ -136,6 +137,9 @@ export type AudioFile = {
   mimeType: string;
 };
 
+// Why a session was deleted; kept on the server with the session id and dates only.
+export type DeleteReason = "consent_withdrawn" | "other";
+
 // The contract both implementations follow.
 export type Api = {
   createSession(session: NewSession): Promise<{ id: string }>;
@@ -152,6 +156,8 @@ export type Api = {
   setSpeakers(id: string, changes: Record<string, string | null>): Promise<Record<string, string>>;
   /** Fix who said one line (0 = first line); null puts it back to automatic. Returns all fixes. */
   setLineSpeaker(id: string, index: number, participantId: string | null): Promise<Record<string, string>>;
+  /** Delete a session for good: audio, transcript and notes. Refused while it's processing. */
+  deleteSession(id: string, reason: DeleteReason): Promise<void>;
   getRoster(): Promise<Person[]>;
   addPerson(person: Person): Promise<Person>;
   removePerson(personId: string): Promise<void>;
@@ -274,6 +280,10 @@ const httpApi: Api = {
       body: JSON.stringify({ participant_id: participantId }),
     });
     return body.line_speakers;
+  },
+
+  deleteSession: async (id, reason) => {
+    await request(`/api/sessions/${id}?reason=${reason}`, { method: "DELETE" });
   },
 
   getRoster: async () => (await request<{ people: Person[] }>("/api/roster")).people,

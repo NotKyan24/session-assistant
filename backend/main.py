@@ -21,6 +21,8 @@ Endpoints (the phone's src/lib/api.ts calls exactly these):
     GET  /api/sessions/{id}/metrics       participation numbers, once "ready"
     PUT  /api/sessions/{id}/speakers      say which participant each speaker is
     PUT  /api/sessions/{id}/lines/{n}     fix who said one transcript line
+    DELETE /api/sessions/{id}             delete a session and its audio, transcript
+                                          and notes (?reason=consent_withdrawn|other)
     GET  /api/roster                      everyone on the shared roster
     POST /api/roster                      add someone to the roster
     DELETE /api/roster/{person_id}        remove someone (past sessions keep them)
@@ -430,15 +432,20 @@ def upload_audio(session_id: str, file: UploadFile = File(...)) -> dict:
                 },
             )
 
-    sessions.update(
-        session_id,
-        status="uploaded",
-        stage="uploaded",
-        audio_file=audio_path.name,
-        audio_bytes=size,
-        audio_sha256=audio_sha256,
-        uploaded_at=sessions.now_iso(),
-    )
+    try:
+        sessions.update(
+            session_id,
+            status="uploaded",
+            stage="uploaded",
+            audio_file=audio_path.name,
+            audio_bytes=size,
+            audio_sha256=audio_sha256,
+            uploaded_at=sessions.now_iso(),
+        )
+    except KeyError:
+        # The session was deleted while its audio was arriving: don't keep the audio.
+        audio_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="Session not found.") from None
     log.info("Session %s: uploaded %.1f MB (%s)", session_id, size / 1_000_000, extension)
     worker.submit(_run_job, session_id, audio_path)
     return {"id": session_id, "status": "uploaded"}
@@ -612,7 +619,7 @@ def list_sessions(q: str = "", include_hidden: bool = False, offset: int = 0, li
 
     q searches the session name and participant names/IDs (not the transcript).
     Test sessions and never-recorded ones are hidden unless include_hidden.
-    Nothing is deleted; hidden sessions stay on disk.
+    Hidden sessions stay on disk; only DELETE /api/sessions/{id} removes one.
     """
     query = q.strip().lower()
     matches = []
@@ -644,4 +651,27 @@ def list_sessions(q: str = "", include_hidden: bool = False, offset: int = 0, li
     # Logs never include names or search text.
     log.info("Sessions listed: %d of %d matching", len(items), len(matches))
     return {"sessions": items, "total": len(matches), "has_more": offset + len(items) < len(matches)}
+
+
+@app.delete("/api/sessions/{session_id}", dependencies=protected)
+def delete_session(session_id: str, reason: sessions.DeleteReason = "other") -> dict:
+    """Delete a session for good: its audio, transcript, notes and session file.
+
+    For consent withdrawal: the whole session goes, for everyone in it (one
+    person's voice can't be cut out of the recording). reason is
+    "consent_withdrawn" or "other"; it's kept in data/deletions.json with the
+    session id and dates only. Refused (409) while the recording is queued or
+    being processed, because the background job would write files back.
+    """
+    try:
+        removed = sessions.delete(session_id, reason, busy_statuses=PROCESSING_STAGES)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found.") from None
+    except sessions.SessionBusy:
+        raise HTTPException(
+            status_code=409,
+            detail="This recording is still being processed. Delete it once it's finished.",
+        ) from None
+    log.info("Session %s: deleted (%d files, reason %s)", session_id, removed, reason)
+    return {"deleted": session_id}
 

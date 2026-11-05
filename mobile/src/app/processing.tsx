@@ -8,7 +8,8 @@
  * highlights the current stage.
  *
  * - Ready: shows a "View results" button (notes, participation, transcript).
- * - Failed: shows which stage failed and the error message, plus "New session".
+ * - Failed: shows which stage failed and the error message, plus "New session"
+ *   and "Delete session".
  * - Network trouble: shows a note and keeps trying.
  * Polling stops on ready or failed, and when the user leaves the screen.
  *
@@ -21,6 +22,7 @@ import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
 
 import { Button } from "@/components/button";
+import { DeleteSession } from "@/components/delete-session";
 import { STAGES, StageList } from "@/components/stage-list";
 import { api, type SessionStatus } from "@/lib/api";
 import { useColors } from "@/lib/theme";
@@ -106,6 +108,8 @@ export default function StatusScreen() {
       )}
       {/* dismissTo("/") closes every screen back to Setup, for a fresh start. */}
       {failed && <Button title="New session" variant="secondary" onPress={() => router.dismissTo("/")} />}
+      {/* A failed session can be deleted too (a ready one is deleted from its results). */}
+      {failed && <DeleteSession id={id} />}
     </ScrollView>
   );
 }
